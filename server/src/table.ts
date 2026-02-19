@@ -191,6 +191,24 @@ export class Table {
     this.state.pot = this.state.pots.reduce((sum, p) => sum + p.amount, 0);
   }
 
+  private returnUnclaimedChips() {
+    const nonFolded = this.state.players.filter(p => p.inHand && !p.folded);
+    if (nonFolded.length === 0) return;
+
+    const maxEligibleBet = Math.max(...nonFolded.map(p => p.totalBet));
+
+    for (const p of this.state.players) {
+      if (!p.inHand) continue;
+      const excess = Math.max(0, p.totalBet - maxEligibleBet);
+      if (excess > 0) {
+        p.stack += excess;
+        p.totalBet -= excess;
+        this.state.pot -= excess;
+        this.pushLog(`${excess} returned to ${p.name} (uncalled).`);
+      }
+    }
+  }
+
   private updateLiveHandRanks() {
     for (const p of this.state.players) {
       if (!p.inHand || p.folded || !p.holeCards) {
@@ -217,6 +235,9 @@ export class Table {
 
     for (let i = 0; i < this.state.pots.length; i++) {
       const pot = this.state.pots[i];
+
+      // Skip pots with no eligible players (all contributors folded)
+      if (pot.eligiblePlayerIds.length === 0) continue;
 
       // Single eligible player — auto-award
       if (pot.eligiblePlayerIds.length === 1) {
@@ -311,6 +332,8 @@ export class Table {
   private maybeEndHandByFolds() {
     const alive = this.state.players.filter(p => p.connected && p.inHand && !p.folded);
     if (alive.length === 1) {
+      this.returnUnclaimedChips();
+      this.updatePots();
       const winner = alive[0];
       const totalWon = this.state.pot;
       winner.stack += totalWon;
@@ -564,6 +587,7 @@ export class Table {
       }
     } else if (next === "SHOWDOWN") {
       this.state.street = next;
+      this.returnUnclaimedChips();
       this.updatePots();
       this.autoEvaluateAndAwardPots();
       this.state.dealerMessage = "Showdown: pots awarded. Choose Show 0/1/2, then dealer ends hand.";
