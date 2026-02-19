@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { connect } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction } from "./types";
 
 type Conn = ReturnType<typeof connect> | null;
+
+const SUIT_GLYPHS: Record<string, string> = { h: "\u2665", d: "\u2666", c: "\u2663", s: "\u2660" };
 
 function streetLabel(s: Street) {
   switch (s) {
@@ -16,7 +18,16 @@ function streetLabel(s: Street) {
 }
 
 function CardPill({ c }: { c: string }) {
-  return <span className="cardChip">{c}</span>;
+  const rank = c.slice(0, -1);
+  const suitChar = c.slice(-1);
+  const glyph = SUIT_GLYPHS[suitChar] ?? suitChar;
+  const isRed = suitChar === "h" || suitChar === "d";
+  return (
+    <span className={`playingCard ${isRed ? "red" : "white"}`}>
+      <span className="rank">{rank}</span>
+      <span className="suit">{glyph}</span>
+    </span>
+  );
 }
 
 function clamp(n: number, lo: number, hi: number) {
@@ -30,11 +41,24 @@ export default function App() {
   const [youId, setYouId] = useState<string | null>(null);
   const [state, setState] = useState<TableState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
   const bank = useMemo(() => state?.players.find(p => p.id === state.bankPlayerId) ?? null, [state]);
   const currentTurnPlayer = useMemo(() => state ? state.players[state.currentTurnIndex] : null, [state]);
+
+  // Tab title: "YOUR TURN" when it's your turn
+  useEffect(() => {
+    if (!state || !youId) {
+      document.title = "Slow Poker";
+      return;
+    }
+    const isYourTurn = state.street !== "DONE" && state.street !== "SHOWDOWN" &&
+      state.players[state.currentTurnIndex]?.id === youId &&
+      !!you?.inHand && !you?.folded;
+    document.title = isYourTurn ? "YOUR TURN — Slow Poker" : "Slow Poker";
+  }, [state, youId, you]);
 
   function join() {
     setError(null);
@@ -83,7 +107,6 @@ export default function App() {
   const isDealer = !!you?.isDealer;
   const isBank = youId === state.bankPlayerId;
 
-  const buttonName = state.positions ? state.players[state.positions.buttonIndex]?.name : "—";
   const toCall = you ? Math.max(0, state.streetBet - you.currentBet) : 0;
   const canAct = state.street !== "DONE" && state.street !== "SHOWDOWN" &&
     state.players[state.currentTurnIndex]?.id === youId &&
@@ -92,8 +115,12 @@ export default function App() {
   const sb = state.settings.smallBlind;
   const bb = state.settings.bigBlind;
 
+  const inActiveHand = state.street !== "DONE" && state.street !== "SHOWDOWN";
+  const seatCount = state.players.length;
+
   return (
     <div className="table">
+      {/* ── Top bar ── */}
       <div className="tableTop">
         <div>
           <div className="title">Table: {state.tableId}</div>
@@ -108,118 +135,147 @@ export default function App() {
         </div>
       </div>
 
-      <div className="row" style={{ marginTop: 12 }}>
-        <div className="card" style={{ flex: 1, minWidth: 360 }}>
-          <div className="hstack" style={{ justifyContent: "space-between" }}>
-            <div><b>Board</b></div>
-            <div className="small">Pot: <b>{state.pot}</b></div>
-          </div>
+      {/* ── Centered board area ── */}
+      <div className="boardArea">
+        <div className="potDisplay">Pot: {state.pot}</div>
 
-          <div className="small" style={{ marginTop: 6 }}>
-            Button: <b>{buttonName}</b> • Blinds: <b>{sb}/{bb}</b>{state.settings.straddleEnabled ? " • Straddle ON" : ""}
-            {" • "}
-            Street bet: <b>{state.streetBet}</b>
-            {" • "}
-            Min raise +<b>{state.lastRaiseSize}</b>
+        {state.pots.length > 0 && (
+          <div className="potBreakdown">
+            {state.pots.map((pot, i) => {
+              const winnerNames = pot.winnerIds?.map(id => state.players.find(p => p.id === id)?.name).filter(Boolean);
+              const isSplit = winnerNames && winnerNames.length > 1;
+              return (
+                <span key={i} className="pill">
+                  {state.pots.length === 1 ? "Main" : i === 0 ? "Main" : `Side #${i}`}: <b>{pot.amount}</b>
+                  {winnerNames && winnerNames.length > 0 && (
+                    <span> → {winnerNames.join(", ")}{isSplit ? " (split)" : ""}{pot.eligiblePlayerIds.length === 1 ? " (uncontested)" : ""}</span>
+                  )}
+                </span>
+              );
+            })}
           </div>
+        )}
 
-          <div className="cards">
-            {state.board.length ? state.board.map((c) => <CardPill key={c} c={c} />) : <span className="small">No board cards yet.</span>}
-          </div>
-
-          <div className="hstack" style={{ marginTop: 10, justifyContent: "space-between" }}>
-            <div><b>Your hole cards</b></div>
-            <div className="small">
-              Stack: <b>{you?.stack ?? 0}</b> • Bet (street): <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
-            </div>
-          </div>
-          <div className="cards">
-            {you?.holeCards ? you.holeCards.map((c) => <CardPill key={c} c={c} />) : <span className="small">Start a hand to deal cards.</span>}
-          </div>
-
-          <div className="notice" style={{ marginTop: 10 }}>
-            <div className="small"><b>Turn:</b> {currentTurnPlayer?.name ?? "—"}</div>
-            <div className="small">{state.roundComplete ? "Betting complete — dealer can advance." : "Betting in progress."}</div>
-          </div>
+        <div className="boardCards">
+          {state.board.length ? state.board.map((c) => <CardPill key={c} c={c} />) : <span className="small">No board cards yet.</span>}
         </div>
 
-        <div className="card" style={{ flex: 1, minWidth: 360 }}>
-          <div className="hstack" style={{ justifyContent: "space-between" }}>
-            <b>Action log</b>
-            <span className="small">Most recent first</span>
-          </div>
-          <div className="log" style={{ marginTop: 8 }}>
-            {state.actionLog.length ? state.actionLog.map((l, i) => <div key={i} className="logLine">{l}</div>) : <div className="small">No actions yet.</div>}
-          </div>
+        {state.winningHandName && (
+          <div className="winBanner">{state.winningHandName}</div>
+        )}
+
+        <div className="boardMeta">
+          Button: <b>{state.positions ? state.players[state.positions.buttonIndex]?.name : "—"}</b> • Blinds: <b>{sb}/{bb}</b>
+          {state.settings.straddleEnabled ? " • Straddle ON" : ""}
+          {" • "}Street bet: <b>{state.streetBet}</b> • Min raise +<b>{state.lastRaiseSize}</b>
+        </div>
+
+        <div className="small" style={{ marginTop: 6 }}>
+          <b>Turn:</b> {currentTurnPlayer?.name ?? "—"}
+          {" — "}
+          {state.roundComplete ? "Betting complete — dealer can advance." : "Betting in progress."}
+        </div>
+      </div>
+
+      {/* ── Your hole cards ── */}
+      <div className="holeArea">
+        <div style={{ fontWeight: 600 }}>Your Hand</div>
+        <div className="holeCards">
+          {you?.holeCards ? you.holeCards.map((c) => <CardPill key={c} c={c} />) : <span className="small">Start a hand to deal cards.</span>}
+        </div>
+        {you?.bestHand && <span className="pill">{you.bestHand}</span>}
+        <div className="small">
+          Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
         </div>
       </div>
 
       {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
       {error && <div className="notice">{error}</div>}
 
-      <div className="seats">
-        {state.players.map((p, i) => (
-          <div
-            key={p.id}
-            className={
-              "seat" +
-              (p.id === youId ? " you" : "") +
-              (p.isDealer ? " dealer" : "") +
-              (i === state.currentTurnIndex && state.street !== "DONE" && state.street !== "SHOWDOWN" ? " turn" : "")
-            }
-          >
-            <div className="hstack" style={{ justifyContent: "space-between" }}>
-              <div>
+      {/* ── Oval seat arrangement ── */}
+      <div className={`seats seats-${seatCount}`}>
+        {state.players.map((p, i) => {
+          const isTurn = i === state.currentTurnIndex && inActiveHand;
+          const isFolded = p.inHand && p.folded;
+          const isSittingOut = !p.inHand;
+          return (
+            <div
+              key={p.id}
+              className={
+                "seat" +
+                (p.id === youId ? " you" : "") +
+                (p.isDealer ? " dealer" : "") +
+                (isTurn ? " turn" : "") +
+                (isFolded ? " folded" : "") +
+                (isSittingOut && state.street !== "DONE" ? " sitting-out" : "")
+              }
+            >
+              <div className="hstack" style={{ justifyContent: "space-between" }}>
                 <div>
-                  <b>{p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
-                  {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8 }}>Bank</span> : null}
+                  <div>
+                    <b>{p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
+                    {/* Position badges */}
+                    {state.positions && state.street !== "DONE" && (
+                      <>
+                        {i === state.positions.buttonIndex && <span className="posBadge btn">BTN</span>}
+                        {i === state.positions.sbIndex && <span className="posBadge sb">SB</span>}
+                        {i === state.positions.bbIndex && <span className="posBadge bb">BB</span>}
+                        {state.positions.straddleIndex !== null && i === state.positions.straddleIndex && <span className="posBadge str">STR</span>}
+                      </>
+                    )}
+                    {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8, fontSize: 10 }}>Bank</span> : null}
+                  </div>
+                  <div className="small">
+                    Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
+                  </div>
                 </div>
-                <div className="small">
-                  Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
-                </div>
+                {isDealer && !p.isDealer && (
+                  <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: p.id })}>
+                    Make dealer
+                  </button>
+                )}
               </div>
-              {isDealer && !p.isDealer && (
-                <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: p.id })}>
-                  Make dealer
-                </button>
+
+              {state.street === "SHOWDOWN" && (
+                <div className="small" style={{ marginTop: 8 }}>
+                  Showdown choice: {renderChoice(state.showdownChoices[p.id])}
+                </div>
+              )}
+
+              {isBank && (
+                <BankRow player={p} onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })} />
               )}
             </div>
-
-            {state.street === "SHOWDOWN" && (
-              <div className="small" style={{ marginTop: 8 }}>
-                Showdown choice: {renderChoice(state.showdownChoices[p.id])}
-              </div>
-            )}
-
-            {isBank && (
-              <BankRow player={p} onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })} />
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
+      {/* ── Sticky action bar ── */}
       <div className="actions">
-        <div className="actionBar">
-          {isBank && (
+        {/* Bank controls always visible to bank */}
+        {isBank && (
+          <div className="actionBar" style={{ marginBottom: 8 }}>
             <BankControls
               settings={state.settings}
               onApply={(sb2, bb2, str) => send({ type: "SET_BLINDS", smallBlind: sb2, bigBlind: bb2, straddleEnabled: str })}
             />
-          )}
+          </div>
+        )}
 
-          {state.street === "DONE" && (
-            <>
-              <button disabled={!isDealer} onClick={() => send({ type: "START_HAND" })}>
-                Dealer: Start hand
-              </button>
-              <span className="small">Strict turn order betting is live in v4.</span>
-            </>
-          )}
+        {state.street === "DONE" && (
+          <div className="actionBar">
+            <button disabled={!isDealer} onClick={() => send({ type: "START_HAND" })}>
+              Dealer: Start hand
+            </button>
+            <span className="small">Strict turn order betting is live in v4.</span>
+          </div>
+        )}
 
-          {state.street !== "DONE" && state.street !== "SHOWDOWN" && (
-            <>
+        {inActiveHand && (
+          canAct ? (
+            <div className="actionBar">
               <BettingPanel
-                enabled={canAct}
+                enabled={true}
                 streetBet={state.streetBet}
                 toCall={toCall}
                 sb={sb}
@@ -228,23 +284,37 @@ export default function App() {
                 you={you!}
                 onAct={(a) => send({ type: "ACT", action: a })}
               />
-              <button disabled={!isDealer || !state.roundComplete} onClick={() => send({ type: "NEXT_STREET" })}>
-                Dealer: Next street
-              </button>
-            </>
-          )}
+            </div>
+          ) : (
+            <div className="waitingBanner">
+              Waiting for <b>{currentTurnPlayer?.name ?? "..."}</b>...
+            </div>
+          )
+        )}
 
-          {state.street === "SHOWDOWN" && (
-            <>
-              <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} />
-              <button disabled={!isDealer} onClick={() => send({ type: "NEXT_STREET" })}>
-                Dealer: End hand
-              </button>
-              <button disabled={!isDealer} onClick={() => send({ type: "END_SESSION" })}>
-                Dealer: End session
-              </button>
-            </>
-          )}
+        {state.street === "SHOWDOWN" && (
+          <div className="actionBar">
+            <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} />
+            <button disabled={!isDealer} onClick={() => send({ type: "NEXT_STREET" })}>
+              Dealer: End hand
+            </button>
+            <button disabled={!isDealer} onClick={() => send({ type: "END_SESSION" })}>
+              Dealer: End session
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Collapsible action log ── */}
+      <div className="logSection">
+        <div className="logToggle" onClick={() => setLogOpen(!logOpen)}>
+          <span>Action Log ({state.actionLog.length})</span>
+          <span className={`chevron ${logOpen ? "open" : ""}`}>▼</span>
+        </div>
+        <div className={`logBody ${logOpen ? "open" : ""}`}>
+          <div className="logBody-inner">
+            {state.actionLog.length ? state.actionLog.map((l, i) => <div key={i} className="logLine">{l}</div>) : <div className="small">No actions yet.</div>}
+          </div>
         </div>
       </div>
     </div>
@@ -304,39 +374,42 @@ function BettingPanel(props: {
     setTo(clamp(Math.floor(v), 0, maxTo));
   }
 
-  const potTo = isBet
-    ? Math.max(bb, pot)
-    : (() => {
-        const potAfterCall = pot + toCall;
-        return streetBet + potAfterCall;
-      })();
+  // Pot-fraction helpers
+  const effectivePot = isBet ? pot : pot + toCall;
+  const fractionTo = (frac: number) => {
+    const amount = Math.floor(effectivePot * frac);
+    return isBet ? Math.max(bb, amount) : Math.max(streetBet + bb, streetBet + amount);
+  };
 
   return (
-    <div className="hstack" style={{ gap: 10 }}>
-      <span className="pill"><b>Your action</b></span>
-
-      <button className="danger" disabled={!enabled} onClick={() => onAct({ kind: "FOLD" })}>Fold</button>
-
+    <>
+      {/* Fold / Check|Call */}
+      <button className="action-primary danger" disabled={!enabled} onClick={() => onAct({ kind: "FOLD" })}>Fold</button>
       {toCall === 0 ? (
-        <button disabled={!enabled} onClick={() => onAct({ kind: "CHECK" })}>Check</button>
+        <button className="action-primary" disabled={!enabled} onClick={() => onAct({ kind: "CHECK" })}>Check</button>
       ) : (
-        <button disabled={!enabled} onClick={() => onAct({ kind: "CALL" })}>Call {toCall}</button>
+        <button className="action-primary" disabled={!enabled} onClick={() => onAct({ kind: "CALL" })}>Call {toCall}</button>
       )}
 
-      <div className="hstack" style={{ gap: 8 }}>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(you.currentBet + sb)}>+SB</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(you.currentBet + bb)}>+BB</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(potTo)}>Pot</button>
+      <div style={{ width: 1, height: 32, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
+
+      {/* Bet presets */}
+      <div className="betPresets">
+        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1/3))}>1/3 Pot</button>
+        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1/2))}>1/2 Pot</button>
+        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(2/3))}>2/3 Pot</button>
+        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1))}>Pot</button>
         <button className="secondary" disabled={!enabled} onClick={() => setToSafe(maxTo)}>All-in</button>
       </div>
 
-      <div className="hstack" style={{ gap: 8 }}>
+      {/* Custom sizing */}
+      <div className="betSizing">
         <span className="small">{isBet ? "Bet to" : "Raise to"}</span>
         <input
           type="number"
           value={safeTo}
           onChange={(e) => setToSafe(Number(e.target.value))}
-          style={{ width: 120 }}
+          style={{ width: 100 }}
           disabled={!enabled}
         />
         <input
@@ -346,7 +419,7 @@ function BettingPanel(props: {
           value={safeTo}
           onChange={(e) => setToSafe(Number(e.target.value))}
           disabled={!enabled}
-          style={{ width: 220 }}
+          style={{ width: 180 }}
         />
         <button
           disabled={!enabled}
@@ -355,9 +428,7 @@ function BettingPanel(props: {
           {isBet ? "Bet" : "Raise"}
         </button>
       </div>
-
-      {!enabled && <span className="small">Waiting for your turn…</span>}
-    </div>
+    </>
   );
 }
 

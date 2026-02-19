@@ -64,3 +64,4 @@ No test suite or linter is configured.
 - Player IDs: 8-char nanoid; Session IDs: 10-char nanoid
 - Action log displays most recent action first
 - Side-pot splitting for all-ins is TODO
+- Sound effects (low priority) is TODO

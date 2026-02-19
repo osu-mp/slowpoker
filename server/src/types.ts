@@ -1,5 +1,11 @@
 export type Street = "PREFLOP" | "FLOP" | "TURN" | "RIVER" | "SHOWDOWN" | "DONE";
 
+export type SidePot = {
+  amount: number;
+  eligiblePlayerIds: string[];
+  winnerIds?: string[];
+};
+
 export type ShowChoice =
   | { kind: "SHOW_0" }
   | { kind: "SHOW_1"; cardIndex: 0 | 1 }
@@ -14,7 +20,9 @@ export type PlayerState = {
   inHand: boolean;
   folded: boolean;
   currentBet: number; // current street contribution
+  totalBet: number; // cumulative across all streets in this hand
   holeCards?: [string, string];
+  bestHand?: string;
 };
 
 export type TableSettings = {
@@ -46,6 +54,7 @@ export type TableState = {
   board: string[];
 
   pot: number;
+  pots: SidePot[];
 
   streetBet: number;
   lastRaiseSize: number;
@@ -56,6 +65,7 @@ export type TableState = {
 
   actionLog: string[];
   dealerMessage?: string;
+  winningHandName?: string;
 };
 
 export type PlayerAction =

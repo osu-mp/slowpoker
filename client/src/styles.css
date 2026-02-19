@@ -4,20 +4,38 @@
   background: radial-gradient(circle at top, #1e3a2f, #0b1411 60%);
 }
 body { margin: 0; }
+
+/* ── Buttons ── */
 button {
   border: 0;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   background: #2b6b4f;
   color: white;
   cursor: pointer;
+  font-size: 14px;
+  transition: filter 0.15s, transform 0.1s;
 }
+button:hover:not(:disabled) { filter: brightness(1.15); }
+button:active:not(:disabled) { transform: scale(0.97); }
 button.secondary {
   background: rgba(255,255,255,0.10);
-  border: 1px solid rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.18);
 }
 button.danger { background: #7a2d2d; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.danger:hover:not(:disabled) { background: #943535; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.action-primary {
+  font-size: 16px;
+  padding: 12px 22px;
+  font-weight: 600;
+  min-width: 100px;
+}
+button.action-primary.danger {
+  background: #7a2d2d;
+}
+
+/* ── Inputs ── */
 input[type="text"], input[type="number"], input[type="range"] {
   padding: 10px 12px;
   border-radius: 10px;
@@ -26,25 +44,31 @@ input[type="text"], input[type="number"], input[type="range"] {
   color: #e8e8e8;
 }
 input[type="range"] { padding: 0; height: 28px; }
+
+/* ── Generic containers ── */
 .card {
   background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: 16px;
   padding: 14px;
 }
 .row { display: flex; gap: 12px; flex-wrap: wrap; }
 .hstack { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.small { opacity: 0.8; font-size: 12px; }
+.small { opacity: 0.85; font-size: 12px; }
 .pill {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 4px 10px; border-radius: 999px;
   background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.15);
+  font-size: 12px;
 }
 .table {
   max-width: 1280px;
   margin: 0 auto;
   padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 .tableTop {
   display: flex;
@@ -53,63 +77,244 @@ input[type="range"] { padding: 0; height: 28px; }
   gap: 12px;
 }
 .title { font-size: 18px; font-weight: 700; }
-.seats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-.seat {
-  padding: 12px;
-  border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(0,0,0,0.20);
-  min-height: 120px;
-}
-.seat.you { outline: 2px solid rgba(255,255,255,0.25); }
-.seat.dealer { background: rgba(43,107,79,0.28); }
-.seat.turn { outline: 2px solid rgba(255,255,255,0.40); }
-.actions {
-  position: sticky;
-  bottom: 0;
-  padding: 12px 0 18px;
-}
-.actionBar {
-  display: flex; gap: 10px; flex-wrap: wrap;
-  padding: 12px;
-  border-radius: 16px;
-  background: rgba(0,0,0,0.35);
-  border: 1px solid rgba(255,255,255,0.10);
-}
 .notice {
-  margin-top: 12px;
   padding: 10px 12px;
   border-radius: 14px;
   background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.15);
 }
-.cards {
+
+/* ── Board area ── */
+.boardArea {
+  text-align: center;
+  padding: 18px;
+  background: rgba(0,0,0,0.15);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+}
+.potDisplay {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffd700;
+  margin-bottom: 4px;
+}
+.potBreakdown {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.boardCards {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.winBanner {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(255,215,0,0.15);
+  border: 1px solid rgba(255,215,0,0.35);
+  color: #ffd700;
+  font-weight: 600;
+  font-size: 14px;
+  margin-top: 4px;
+}
+.boardMeta {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 8px;
+}
+
+/* ── Hole cards area ── */
+.holeArea {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+}
+.holeCards {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Playing cards ── */
+.playingCard {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 62px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1;
+  user-select: none;
+}
+.playingCard.red { color: #e74c3c; }
+.playingCard.white { color: #f0f0f0; }
+.playingCard .rank {
+  font-size: 17px;
+  font-weight: 700;
+}
+.playingCard .suit {
+  font-size: 13px;
+  margin-top: -1px;
+}
+.playingCard.card-back {
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border-color: rgba(255,255,255,0.15);
+}
+
+/* ── Oval seat layout ── */
+.seats {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+/* Default: 3 columns */
+.seats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* 4+ players: try to create an oval feel */
+.seats.seats-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.seats.seats-5,
+.seats.seats-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.seats.seats-7,
+.seats.seats-8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.seats.seats-9,
+.seats.seats-10 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+.seat {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(0,0,0,0.20);
+  min-height: 80px;
+  transition: opacity 0.3s, box-shadow 0.3s;
+}
+.seat.you { outline: 2px solid rgba(255,255,255,0.3); }
+.seat.dealer { background: rgba(43,107,79,0.28); }
+.seat.folded { opacity: 0.4; }
+.seat.sitting-out { opacity: 0.4; }
+
+/* Active turn glow */
+.seat.turn {
+  outline: none;
+  box-shadow: 0 0 14px rgba(255,215,0,0.5), 0 0 4px rgba(255,215,0,0.3);
+  animation: turnPulse 1.8s ease-in-out infinite;
+}
+@keyframes turnPulse {
+  0%, 100% { box-shadow: 0 0 14px rgba(255,215,0,0.5), 0 0 4px rgba(255,215,0,0.3); }
+  50% { box-shadow: 0 0 22px rgba(255,215,0,0.7), 0 0 8px rgba(255,215,0,0.4); }
+}
+
+/* Position badges */
+.posBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 6px;
+  text-transform: uppercase;
+}
+.posBadge.btn { background: #d4a017; color: #000; }
+.posBadge.sb { background: #5b8def; color: #fff; }
+.posBadge.bb { background: #e67e22; color: #fff; }
+.posBadge.str { background: #9b59b6; color: #fff; }
+
+/* ── Action bar ── */
+.actions {
+  position: sticky;
+  bottom: 0;
+  padding: 8px 0 14px;
+}
+.actionBar {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.15);
+  backdrop-filter: blur(8px);
+}
+.waitingBanner {
+  text-align: center;
+  padding: 10px 16px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 14px;
+  opacity: 0.7;
+}
+.betPresets {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
   flex-wrap: wrap;
 }
-.cardChip {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(0,0,0,0.25);
+.betSizing {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
-.log {
-  max-height: 260px;
+
+/* ── Action log (collapsible) ── */
+.logSection {
+  border-radius: 14px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid rgba(255,255,255,0.12);
+  overflow: hidden;
+}
+.logToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.03);
+}
+.logToggle:hover { background: rgba(255,255,255,0.06); }
+.logToggle .chevron {
+  transition: transform 0.2s;
+  font-size: 12px;
+}
+.logToggle .chevron.open { transform: rotate(180deg); }
+.logBody {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+.logBody.open {
+  max-height: 300px;
   overflow: auto;
-  padding-right: 6px;
+}
+.logBody-inner {
+  padding: 0 14px 10px;
 }
 .logLine {
   font-size: 12px;
   opacity: 0.9;
   padding: 4px 0;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Responsive ── */
+@media (max-width: 700px) {
+  .tableTop { flex-direction: column; align-items: flex-start; }
+  .seats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .actionBar { flex-direction: column; align-items: stretch; }
+  .betSizing { flex-direction: column; }
+  button.action-primary { width: 100%; min-height: 48px; }
+  .holeArea { flex-direction: column; }
 }

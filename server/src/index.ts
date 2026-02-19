@@ -25,7 +25,8 @@ function redactState(state: TableState, youId: string): TableState {
     deck: undefined,
     players: state.players.map((p) => ({
       ...p,
-      holeCards: p.id === youId ? p.holeCards : undefined
+      holeCards: p.id === youId ? p.holeCards : undefined,
+      bestHand: p.id === youId ? p.bestHand : undefined
     }))
   };
 }
