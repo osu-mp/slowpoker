@@ -72,4 +72,8 @@ async function main() {
   console.log(`Wrote recap: ${outPath}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// Only run CLI when this file is the entry point
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"));
+if (isMain) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}

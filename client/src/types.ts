@@ -77,6 +77,50 @@ export type PlayerAction =
   | { kind: "BET"; to: number }
   | { kind: "RAISE"; to: number };
 
+export type HandAction = {
+  playerId: string;
+  playerName: string;
+  street: string;
+  action: string;
+  amount?: number;
+};
+
+export type HandPotAward = {
+  potIndex: number;
+  winnerIds: string[];
+  winnerNames: string[];
+  amount: number;
+  split?: boolean;
+  auto?: boolean;
+};
+
+export type HandShowdown = {
+  playerId: string;
+  playerName: string;
+  choice: string;
+};
+
+export type StreetBoard = {
+  street: string;
+  board: string[];
+};
+
+export type HandSummary = {
+  handNumber: number;
+  startTs: number;
+  endTs: number;
+  outcome: "showdown" | "uncontested" | "voided";
+  players: { id: string; name: string }[];
+  blinds: { smallBlind: number; bigBlind: number };
+  posts: { playerName: string; label: string; amount: number }[];
+  actions: HandAction[];
+  streets: StreetBoard[];
+  finalBoard: string[];
+  potAwards: HandPotAward[];
+  showdownChoices: HandShowdown[];
+  totalPot: number;
+};
+
 export type ClientToServer =
   | { type: "HELLO"; tableId: string; name: string; playerId?: string }
   | { type: "SET_DEALER"; playerId: string }

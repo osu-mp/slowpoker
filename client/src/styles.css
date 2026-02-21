@@ -331,6 +331,56 @@ input[type="range"] { padding: 0; height: 28px; }
   color: #e8e8e8;
 }
 
+/* ── Hand History modal ── */
+.handHistoryModal {
+  background: #1a2a22;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 20px;
+  padding: 24px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  color: #e8e8e8;
+}
+.handList {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.handEntry {
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.handHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  background: rgba(255,255,255,0.03);
+}
+.handHeader:hover { background: rgba(255,255,255,0.06); }
+.handDetail {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.streetSection {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.streetHeader {
+  font-size: 12px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ── Reconnect banner ── */
 .reconnectBanner {
   position: sticky;

@@ -8,6 +8,7 @@ import type WebSocket from "ws";
 import { Table } from "./table.js";
 import type { ClientToServer, ServerToClient, TableState } from "./types.js";
 import { readJsonl, summarize } from "./recap.js";
+import { reconstructHands } from "./handHistory.js";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -78,6 +79,15 @@ app.get("/api/recap/:tableId/:sessionId", (_req, res) => {
   const s = summarize(events);
   const date = new Date(s.started ?? Date.now()).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   res.json({ tableId, sessionId, date, players: s.joins, durationMin: s.durationMin, hands: s.hands, actions: s.actions, posts: s.posts });
+});
+
+app.get("/api/hands/:tableId/:sessionId", (_req, res) => {
+  const { tableId, sessionId } = _req.params;
+  const logFile = path.join(sessionsDir, tableId, `${sessionId}.jsonl`);
+  if (!fs.existsSync(logFile)) return res.status(404).json({ error: "Session not found." });
+  const events = readJsonl(logFile);
+  const hands = reconstructHands(events);
+  res.json(hands);
 });
 
 const server = http.createServer(app);

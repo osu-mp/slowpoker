@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
-import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction } from "./types";
+import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary } from "./types";
 
 type Conn = ReturnType<typeof connect> | null;
 
@@ -77,6 +77,10 @@ export default function App() {
   const [recap, setRecap] = useState<any>(null);
   const [recapOpen, setRecapOpen] = useState(false);
   const [recapLoading, setRecapLoading] = useState(false);
+  const [handHistory, setHandHistory] = useState<HandSummary[]>([]);
+  const [handHistoryOpen, setHandHistoryOpen] = useState(false);
+  const [handHistoryLoading, setHandHistoryLoading] = useState(false);
+  const [expandedHand, setExpandedHand] = useState<number | null>(null);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
@@ -128,6 +132,17 @@ export default function App() {
       .then(data => { setRecap(data); setRecapOpen(true); })
       .catch(() => setError("Failed to load session recap."))
       .finally(() => setRecapLoading(false));
+  }
+
+  function fetchHandHistory() {
+    const sid = sessionIdRef.current ?? state?.sessionId;
+    if (!sid) return;
+    setHandHistoryLoading(true);
+    fetch(`http://localhost:3001/api/hands/${tableId}/${sid}`)
+      .then(r => r.json())
+      .then(data => { setHandHistory(data); setHandHistoryOpen(true); })
+      .catch(() => setError("Failed to load hand history."))
+      .finally(() => setHandHistoryLoading(false));
   }
 
   function send(msg: any) { conn?.send(msg); }
@@ -188,6 +203,9 @@ export default function App() {
           <span className="pill">You: <b>{you?.name}</b></span>
           <span className="pill">Dealer: <b>{dealer?.name ?? "—"}</b></span>
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
+          <button className="secondary" onClick={fetchHandHistory} disabled={handHistoryLoading}>
+            {handHistoryLoading ? "Loading..." : "Hand History"}
+          </button>
         </div>
       </div>
 
@@ -503,6 +521,118 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ── Hand History modal ── */}
+      {handHistoryOpen && (
+        <div className="recapOverlay" onClick={() => setHandHistoryOpen(false)}>
+          <div className="handHistoryModal" onClick={(e) => e.stopPropagation()}>
+            <div className="title">Hand History</div>
+            {handHistory.length === 0 ? (
+              <div className="small" style={{ marginTop: 12 }}>No hands played yet.</div>
+            ) : (
+              <div className="handList">
+                {handHistory.map((h) => (
+                  <div key={h.handNumber} className="handEntry">
+                    <div
+                      className="handHeader"
+                      onClick={() => setExpandedHand(expandedHand === h.handNumber ? null : h.handNumber)}
+                    >
+                      <span>
+                        <b>Hand #{h.handNumber}</b>
+                        {" — "}
+                        <span className={`pill ${h.outcome === "voided" ? "danger" : ""}`}>
+                          {h.outcome === "showdown" ? "Showdown" : h.outcome === "uncontested" ? "Uncontested" : "Voided"}
+                        </span>
+                        {h.potAwards.length > 0 && (
+                          <span style={{ marginLeft: 8, opacity: 0.8 }}>
+                            {h.potAwards.map(a => a.winnerNames.join(", ")).join("; ")} wins
+                          </span>
+                        )}
+                      </span>
+                      <span className={`chevron ${expandedHand === h.handNumber ? "open" : ""}`}>&#x25BC;</span>
+                    </div>
+                    {expandedHand === h.handNumber && (
+                      <div className="handDetail">
+                        <div className="small">
+                          Blinds: {h.blinds.smallBlind}/{h.blinds.bigBlind}
+                          {" — "}Players: {h.players.map(p => p.name).join(", ")}
+                        </div>
+
+                        {h.posts.length > 0 && (
+                          <div style={{ marginTop: 6 }}>
+                            {h.posts.map((p, i) => (
+                              <div key={i} className="small">{p.playerName} posts {p.label} {p.amount}</div>
+                            ))}
+                          </div>
+                        )}
+
+                        {renderStreetActions(h, "PREFLOP", "Preflop")}
+                        {renderStreetActions(h, "FLOP", "Flop")}
+                        {renderStreetActions(h, "TURN", "Turn")}
+                        {renderStreetActions(h, "RIVER", "River")}
+
+                        {h.finalBoard.length > 0 && (
+                          <div style={{ marginTop: 8 }}>
+                            <b className="small">Board:</b>{" "}
+                            {h.finalBoard.map((c, i) => <CardPill key={i} c={c} />)}
+                          </div>
+                        )}
+
+                        {h.potAwards.length > 0 && (
+                          <div style={{ marginTop: 8 }}>
+                            {h.potAwards.map((a, i) => (
+                              <div key={i} className="small">
+                                {a.winnerNames.join(", ")} wins {a.amount}
+                                {a.split ? " (split)" : ""}
+                                {a.auto ? " (uncontested)" : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {h.showdownChoices.length > 0 && (
+                          <div style={{ marginTop: 6 }}>
+                            {h.showdownChoices.map((s, i) => (
+                              <div key={i} className="small">{s.playerName}: {s.choice.replace("SHOW_", "Show ").replace("_", " ")}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <button style={{ marginTop: 14 }} onClick={() => setHandHistoryOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderStreetActions(h: HandSummary, street: string, label: string) {
+  const actions = h.actions.filter(a => a.street === street);
+  if (actions.length === 0) return null;
+
+  const streetInfo = h.streets.find(s => s.street === street);
+  const board = streetInfo?.board ?? [];
+
+  return (
+    <div className="streetSection">
+      <div className="streetHeader">
+        <b>{label}</b>
+        {board.length > 0 && (
+          <span style={{ marginLeft: 8 }}>
+            {board.map((c, i) => <CardPill key={i} c={c} />)}
+          </span>
+        )}
+      </div>
+      {actions.map((a, i) => (
+        <div key={i} className="small">
+          {a.playerName} {a.action.toLowerCase()}{a.amount != null ? ` ${a.amount}` : ""}
+        </div>
+      ))}
     </div>
   );
 }
