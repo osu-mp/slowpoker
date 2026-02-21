@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction } from "./types";
 
@@ -32,6 +33,35 @@ function CardPill({ c }: { c: string }) {
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
+}
+
+const cardFlip = {
+  initial: { opacity: 0, rotateY: 90, scale: 0.8 },
+  animate: { opacity: 1, rotateY: 0, scale: 1 },
+  exit: { opacity: 0, scale: 0.8 },
+};
+
+const holeFlip = {
+  initial: { opacity: 0, rotateY: 180, scale: 0.7 },
+  animate: { opacity: 1, rotateY: 0, scale: 1 },
+  exit: { opacity: 0, scale: 0.7 },
+};
+
+const cardSpring = { type: "spring" as const, stiffness: 300, damping: 20 };
+
+function AnimatedNumber({ value }: { value: number }) {
+  const mv = useMotionValue(value);
+  const display = useTransform(mv, (v) => String(Math.round(v)));
+  const ref = useRef(value);
+
+  useEffect(() => {
+    if (ref.current !== value) {
+      ref.current = value;
+      animate(mv, value, { duration: 0.4 });
+    }
+  }, [value, mv]);
+
+  return <motion.span>{display}</motion.span>;
 }
 
 export default function App() {
@@ -137,7 +167,7 @@ export default function App() {
 
       {/* ── Centered board area ── */}
       <div className="boardArea">
-        <div className="potDisplay">Pot: {state.pot}</div>
+        <div className="potDisplay">Pot: <AnimatedNumber value={state.pot} /></div>
 
         {state.pots.length > 0 && (
           <div className="potBreakdown">
@@ -157,12 +187,34 @@ export default function App() {
         )}
 
         <div className="boardCards">
-          {state.board.length ? state.board.map((c) => <CardPill key={c} c={c} />) : <span className="small">No board cards yet.</span>}
+          <AnimatePresence>
+            {state.board.length ? state.board.map((c, i) => (
+              <motion.div
+                key={c}
+                {...cardFlip}
+                transition={{ ...cardSpring, delay: i * 0.15 }}
+                style={{ perspective: 600 }}
+              >
+                <CardPill c={c} />
+              </motion.div>
+            )) : <span className="small">No board cards yet.</span>}
+          </AnimatePresence>
         </div>
 
-        {state.winningHandName && (
-          <div className="winBanner">{state.winningHandName}</div>
-        )}
+        <AnimatePresence>
+          {state.winningHandName && (
+            <motion.div
+              className="winBanner"
+              key={state.winningHandName}
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.5 }}
+              transition={{ type: "spring", stiffness: 400, damping: 15 }}
+            >
+              {state.winningHandName}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div className="boardMeta">
           Button: <b>{state.positions ? state.players[state.positions.buttonIndex]?.name : "—"}</b> • Blinds: <b>{sb}/{bb}</b>
@@ -181,9 +233,23 @@ export default function App() {
       <div className="holeArea">
         <div style={{ fontWeight: 600 }}>Your Hand</div>
         <div className="holeCards">
-          {you?.holeCards ? you.holeCards.map((c) => <CardPill key={c} c={c} />) : <span className="small">Start a hand to deal cards.</span>}
+          <AnimatePresence mode="wait" key={state.handNumber}>
+            {you?.holeCards ? you.holeCards.map((c, i) => (
+              <motion.div
+                key={c}
+                {...holeFlip}
+                transition={{ ...cardSpring, delay: i * 0.1 }}
+                style={{ perspective: 600 }}
+              >
+                <CardPill c={c} />
+              </motion.div>
+            )) : <span className="small">Start a hand to deal cards.</span>}
+          </AnimatePresence>
         </div>
         {you?.bestHand && <span className="pill">{you.bestHand}</span>}
+        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && (
+          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "REVEAL_HAND" })}>Show Cards</button>
+        )}
         <div className="small">
           Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
         </div>
@@ -236,9 +302,51 @@ export default function App() {
                 )}
               </div>
 
-              {state.street === "SHOWDOWN" && (
-                <div className="small" style={{ marginTop: 8 }}>
-                  Showdown choice: {renderChoice(state.showdownChoices[p.id])}
+              {/* Show revealed cards on any street, or showdown status */}
+              {p.id !== youId && p.holeCards && state.showdownChoices[p.id]?.kind === "SHOW_2" && state.street !== "SHOWDOWN" && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="holeCards">
+                    <AnimatePresence>
+                      {p.holeCards.map((c, ci) => (
+                        <motion.div
+                          key={c}
+                          {...cardFlip}
+                          transition={{ ...cardSpring, delay: ci * 0.1 }}
+                          style={{ perspective: 600 }}
+                        >
+                          <CardPill c={c} />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                  {p.bestHand && <span className="pill">{p.bestHand}</span>}
+                </div>
+              )}
+              {state.street === "SHOWDOWN" && p.id !== youId && (
+                <div style={{ marginTop: 8 }}>
+                  {p.holeCards ? (
+                    <div>
+                      <div className="holeCards">
+                        <AnimatePresence>
+                          {p.holeCards.map((c, ci) => (
+                            <motion.div
+                              key={c}
+                              {...cardFlip}
+                              transition={{ ...cardSpring, delay: ci * 0.1 }}
+                              style={{ perspective: 600 }}
+                            >
+                              <CardPill c={c} />
+                            </motion.div>
+                          ))}
+                        </AnimatePresence>
+                      </div>
+                      {p.bestHand && <span className="pill">{p.bestHand}</span>}
+                    </div>
+                  ) : (
+                    <div className="small">
+                      {state.showdownChoices[p.id] ? renderChoice(state.showdownChoices[p.id]) : "Waiting..."}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -292,9 +400,22 @@ export default function App() {
           )
         )}
 
+        {inActiveHand && isDealer && (
+          <div className="actionBar">
+            <button className="secondary danger" onClick={() => {
+              if (confirm("Void this hand? All bets will be returned.")) send({ type: "NEXT_STREET" });
+            }}>Dealer: Void Hand</button>
+          </div>
+        )}
+
         {state.street === "SHOWDOWN" && (
           <div className="actionBar">
-            <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} />
+            {!state.showdownChoices[youId] && (
+              <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} />
+            )}
+            {state.showdownChoices[youId] && (
+              <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
+            )}
             <button disabled={!isDealer} onClick={() => send({ type: "NEXT_STREET" })}>
               Dealer: End hand
             </button>

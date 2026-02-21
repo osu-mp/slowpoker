@@ -7,6 +7,8 @@ export type HandResult = {
 };
 
 const RANK_ORDER = "23456789TJQKA";
+const RANK_NAMES_PLURAL = ["Twos","Threes","Fours","Fives","Sixes","Sevens","Eights","Nines","Tens","Jacks","Queens","Kings","Aces"];
+const RANK_NAMES_SINGULAR = ["Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Jack","Queen","King","Ace"];
 
 function cardRank(card: string): number {
   return RANK_ORDER.indexOf(card[0]);
@@ -75,50 +77,50 @@ function evaluate5(cards: string[]): HandResult {
 
   // Straight flush
   if (isFlush && isStraight) {
-    return { rank: 8, name: straightHigh === 12 ? "Royal Flush" : "Straight Flush", score: encode(8, [straightHigh]) };
+    return { rank: 8, name: straightHigh === 12 ? "Royal Flush" : `Straight Flush, ${RANK_NAMES_SINGULAR[straightHigh]}-high`, score: encode(8, [straightHigh]) };
   }
 
   // Four of a kind
   if (groups[0][1] === 4) {
-    return { rank: 7, name: "Four of a Kind", score: encode(7, [groups[0][0], groups[1][0]]) };
+    return { rank: 7, name: `Quad ${RANK_NAMES_PLURAL[groups[0][0]]}`, score: encode(7, [groups[0][0], groups[1][0]]) };
   }
 
   // Full house
   if (groups[0][1] === 3 && groups[1][1] === 2) {
-    return { rank: 6, name: "Full House", score: encode(6, [groups[0][0], groups[1][0]]) };
+    return { rank: 6, name: `Full House, ${RANK_NAMES_PLURAL[groups[0][0]]} full of ${RANK_NAMES_PLURAL[groups[1][0]]}`, score: encode(6, [groups[0][0], groups[1][0]]) };
   }
 
   // Flush
   if (isFlush) {
-    return { rank: 5, name: "Flush", score: encode(5, ranks) };
+    return { rank: 5, name: `Flush, ${RANK_NAMES_SINGULAR[ranks[0]]}-high`, score: encode(5, ranks) };
   }
 
   // Straight
   if (isStraight) {
-    return { rank: 4, name: "Straight", score: encode(4, [straightHigh]) };
+    return { rank: 4, name: `Straight, ${RANK_NAMES_SINGULAR[straightHigh]}-high`, score: encode(4, [straightHigh]) };
   }
 
   // Three of a kind
   if (groups[0][1] === 3) {
     const kickers = groups.slice(1).map(g => g[0]).sort((a, b) => b - a);
-    return { rank: 3, name: "Three of a Kind", score: encode(3, [groups[0][0], ...kickers]) };
+    return { rank: 3, name: `Trip ${RANK_NAMES_PLURAL[groups[0][0]]}`, score: encode(3, [groups[0][0], ...kickers]) };
   }
 
   // Two pair
   if (groups[0][1] === 2 && groups[1][1] === 2) {
     const pairRanks = [groups[0][0], groups[1][0]].sort((a, b) => b - a);
     const kicker = groups[2][0];
-    return { rank: 2, name: "Two Pair", score: encode(2, [...pairRanks, kicker]) };
+    return { rank: 2, name: `Two Pair, ${RANK_NAMES_PLURAL[pairRanks[0]]} and ${RANK_NAMES_PLURAL[pairRanks[1]]}`, score: encode(2, [...pairRanks, kicker]) };
   }
 
   // One pair
   if (groups[0][1] === 2) {
     const kickers = groups.slice(1).map(g => g[0]).sort((a, b) => b - a);
-    return { rank: 1, name: "One Pair", score: encode(1, [groups[0][0], ...kickers]) };
+    return { rank: 1, name: `Pair of ${RANK_NAMES_PLURAL[groups[0][0]]}`, score: encode(1, [groups[0][0], ...kickers]) };
   }
 
   // High card
-  return { rank: 0, name: "High Card", score: encode(0, ranks) };
+  return { rank: 0, name: `High Card, ${RANK_NAMES_SINGULAR[ranks[0]]}`, score: encode(0, ranks) };
 }
 
 /**
@@ -134,10 +136,10 @@ export function evaluateBest(cards: string[]): HandResult | null {
     const hasPair = new Set(ranks).size < ranks.length;
     if (hasPair) {
       const pairRank = ranks.find((r, i) => ranks.indexOf(r) !== i)!;
-      return { rank: 1, name: "One Pair", score: encode(1, [pairRank]) };
+      return { rank: 1, name: `Pair of ${RANK_NAMES_PLURAL[pairRank]}`, score: encode(1, [pairRank]) };
     }
     const high = Math.max(...ranks);
-    return { rank: 0, name: "High Card", score: encode(0, [high]) };
+    return { rank: 0, name: `High Card, ${RANK_NAMES_SINGULAR[high]}`, score: encode(0, [high]) };
   }
 
   const combos = combinations(cards, 5);

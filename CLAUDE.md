@@ -64,3 +64,4 @@ No test suite or linter is configured.
 - Player IDs: 8-char nanoid; Session IDs: 10-char nanoid
 - Action log displays most recent action first
 - Sound effects (low priority) is TODO
+- More complex animations (chip movement to pot, card deal from deck, slide transitions between streets) is TODO (low priority)

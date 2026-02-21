@@ -271,6 +271,20 @@ export class Table {
         }
       }
 
+      // Auto-show winners' cards (standard poker rules)
+      for (const wId of winners) {
+        if (!this.state.showdownChoices[wId]) {
+          this.state.showdownChoices[wId] = { kind: "SHOW_2" };
+          const wp = this.playerById(wId);
+          if (wp?.holeCards) {
+            const hand = evaluateBest([...wp.holeCards, ...this.state.board]);
+            const handStr = hand ? ` — ${hand.name}` : "";
+            this.pushLog(`${wp.name} shows ${wp.holeCards[0]} ${wp.holeCards[1]}${handStr}.`);
+            appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: wId, choice: { kind: "SHOW_2" }, auto: true } });
+          }
+        }
+      }
+
       if (winners.length === 1) {
         const winner = this.playerById(winners[0])!;
         winner.stack += pot.amount;
@@ -613,6 +627,29 @@ export class Table {
     this.requireDealer(dealerId);
     if (this.state.street === "DONE") throw new Error("No active hand.");
 
+    // Void hand: dealer force-ends during an active betting street
+    if (this.state.street !== "SHOWDOWN") {
+      // Refund all bets to players
+      for (const p of this.state.players) {
+        if (p.inHand) {
+          p.stack += p.totalBet;
+          p.totalBet = 0;
+          p.currentBet = 0;
+        }
+      }
+      this.state.pot = 0;
+      this.state.pots = [];
+      this.state.street = "DONE";
+      this.state.positions = null;
+      this.state.streetBet = 0;
+      this.state.roundComplete = true;
+      this.state.winningHandName = undefined;
+      this.state.dealerMessage = "Hand voided by dealer. All bets returned.";
+      this.pushLog("--- Hand voided by dealer ---");
+      appendEvent({ ts: Date.now(), type: "HAND_VOIDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
+      return;
+    }
+
     if (this.state.street === "SHOWDOWN") {
       // Only manual advance: SHOWDOWN → DONE
       this.state.street = "DONE";
@@ -628,6 +665,19 @@ export class Table {
     }
 
     throw new Error("Streets advance automatically. Dealer only ends the hand from showdown.");
+  }
+
+  revealHand(playerId: string) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    if (!p.holeCards) throw new Error("You have no cards to reveal.");
+    if (this.state.showdownChoices[playerId]?.kind === "SHOW_2") throw new Error("Cards already revealed.");
+
+    this.state.showdownChoices[playerId] = { kind: "SHOW_2" };
+    const hand = evaluateBest([...p.holeCards, ...this.state.board]);
+    const handStr = hand ? ` — ${hand.name}` : "";
+    this.pushLog(`${p.name} reveals ${p.holeCards[0]} ${p.holeCards[1]}${handStr}.`);
+    appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice: { kind: "SHOW_2" }, voluntary: true } });
   }
 
   setShowdownChoice(playerId: string, choice: ShowChoice) {

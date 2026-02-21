@@ -20,14 +20,24 @@ function getOrCreateTable(tableId: string) {
 }
 
 function redactState(state: TableState, youId: string): TableState {
+  const isShowdown = state.street === "SHOWDOWN";
   return {
     ...state,
     deck: undefined,
-    players: state.players.map((p) => ({
-      ...p,
-      holeCards: p.id === youId ? p.holeCards : undefined,
-      bestHand: p.id === youId ? p.bestHand : undefined
-    }))
+    players: state.players.map((p) => {
+      if (p.id === youId) return { ...p };
+
+      // Reveal cards if player has chosen to show (any street, including voluntary reveals)
+      const choice = state.showdownChoices[p.id];
+      if (choice?.kind === "SHOW_2") {
+        return { ...p }; // full holeCards + bestHand
+      }
+      if (isShowdown && choice?.kind === "SHOW_1" && p.holeCards) {
+        return { ...p, holeCards: p.holeCards, bestHand: undefined };
+      }
+
+      return { ...p, holeCards: undefined, bestHand: undefined };
+    })
   };
 }
 
@@ -82,6 +92,7 @@ wss.on("connection", (ws) => {
         case "ACT": table.act(current.playerId, msg.action); break;
         case "NEXT_STREET": table.nextStreet(current.playerId); break;
         case "SHOWDOWN_CHOICE": table.setShowdownChoice(current.playerId, msg.choice); break;
+        case "REVEAL_HAND": table.revealHand(current.playerId); break;
         case "END_SESSION":
           table.endSession(current.playerId);
           for (const c of conns) {

@@ -111,6 +111,7 @@ input[type="range"] { padding: 0; height: 28px; }
   justify-content: center;
   flex-wrap: wrap;
   margin: 12px 0;
+  perspective: 600px;
 }
 .winBanner {
   display: inline-block;
@@ -143,6 +144,7 @@ input[type="range"] { padding: 0; height: 28px; }
 .holeCards {
   display: flex;
   gap: 8px;
+  perspective: 600px;
 }
 
 /* ── Playing cards ── */

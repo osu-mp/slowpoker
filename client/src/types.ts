@@ -86,6 +86,7 @@ export type ClientToServer =
   | { type: "ACT"; action: PlayerAction }
   | { type: "NEXT_STREET" }
   | { type: "SHOWDOWN_CHOICE"; choice: ShowChoice }
+  | { type: "REVEAL_HAND" }
   | { type: "END_SESSION" };
 
 export type ServerToClient =
