@@ -99,6 +99,15 @@ export class Table {
     return p;
   }
 
+  reconnectPlayer(playerId: string, name: string): PlayerState | null {
+    const p = this.playerById(playerId);
+    if (!p || p.name !== name) return null;
+    p.connected = true;
+    this.pushLog(`${p.name} reconnected.`);
+    appendEvent({ ts: Date.now(), type: "PLAYER_RECONNECTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+    return p;
+  }
+
   markDisconnected(playerId: string) {
     const p = this.playerById(playerId);
     if (!p) return;
@@ -651,16 +660,8 @@ export class Table {
     }
 
     if (this.state.street === "SHOWDOWN") {
-      // Only manual advance: SHOWDOWN → DONE
-      this.state.street = "DONE";
-      this.state.positions = null;
-      this.state.pots = [];
-      this.state.pot = 0;
-      this.state.winningHandName = undefined;
-      this.state.dealerMessage = "Hand ended. Dealer may start next hand.";
-      this.pushLog("--- Hand ended ---");
-      appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
-      appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: "SHOWDOWN", to: "DONE", handNumber: this.state.handNumber, board: this.state.board } });
+      // Dealer force-advance: SHOWDOWN → DONE
+      this.endHand();
       return;
     }
 
@@ -678,6 +679,24 @@ export class Table {
     const handStr = hand ? ` — ${hand.name}` : "";
     this.pushLog(`${p.name} reveals ${p.holeCards[0]} ${p.holeCards[1]}${handStr}.`);
     appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice: { kind: "SHOW_2" }, voluntary: true } });
+  }
+
+  private endHand() {
+    this.state.street = "DONE";
+    this.state.positions = null;
+    this.state.pots = [];
+    this.state.pot = 0;
+    this.state.winningHandName = undefined;
+    this.state.dealerMessage = "Hand ended. Dealer may start next hand.";
+    this.pushLog("--- Hand ended ---");
+    appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
+    appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: "SHOWDOWN", to: "DONE", handNumber: this.state.handNumber, board: this.state.board } });
+  }
+
+  private allShowdownChoicesMade(): boolean {
+    return this.state.players
+      .filter(p => p.inHand && !p.folded)
+      .every(p => !!this.state.showdownChoices[p.id]);
   }
 
   setShowdownChoice(playerId: string, choice: ShowChoice) {
@@ -701,6 +720,12 @@ export class Table {
       }
     }
     appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice } });
+
+    // Auto-advance to DONE once all eligible players have chosen
+    if (this.allShowdownChoicesMade()) {
+      this.pushLog("All players have chosen — hand complete.");
+      this.endHand();
+    }
   }
 
   endSession(dealerId: string) {

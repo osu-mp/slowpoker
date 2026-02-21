@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
-import { connect } from "./ws";
+import { connect, type ConnStatus } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction } from "./types";
 
 type Conn = ReturnType<typeof connect> | null;
@@ -72,6 +72,11 @@ export default function App() {
   const [state, setState] = useState<TableState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [connStatus, setConnStatus] = useState<ConnStatus>("disconnected");
+  const sessionIdRef = useRef<string | null>(null);
+  const [recap, setRecap] = useState<any>(null);
+  const [recapOpen, setRecapOpen] = useState(false);
+  const [recapLoading, setRecapLoading] = useState(false);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
@@ -92,16 +97,37 @@ export default function App() {
 
   function join() {
     setError(null);
-    const c = connect((m: ServerToClient) => {
-      if (m.type === "WELCOME") { setYouId(m.youId); setState(m.state); }
-      else if (m.type === "STATE") { setState(m.state); }
-      else if (m.type === "ERROR") { setError(m.message); }
-      else if (m.type === "SESSION_ENDED") {
-        setError(`Session ended (table ${m.tableId}, session ${m.sessionId}). Refresh to start again.`);
-      }
-    }, () => setError("Disconnected from server."));
+    const storedPlayerId = localStorage.getItem(`sp-playerId-${tableId}`) ?? undefined;
+    const c = connect(
+      { tableId, name, playerId: storedPlayerId },
+      (m: ServerToClient) => {
+        if (m.type === "WELCOME") {
+          setYouId(m.youId);
+          setState(m.state);
+          localStorage.setItem(`sp-playerId-${tableId}`, m.youId);
+          sessionIdRef.current = m.state.sessionId;
+        }
+        else if (m.type === "STATE") { setState(m.state); }
+        else if (m.type === "ERROR") { setError(m.message); }
+        else if (m.type === "SESSION_ENDED") {
+          setError(`Session ended (table ${m.tableId}, session ${m.sessionId}). Refresh to start again.`);
+          sessionIdRef.current = m.sessionId;
+        }
+      },
+      setConnStatus
+    );
     setConn(c);
-    c.send({ type: "HELLO", tableId, name });
+  }
+
+  function fetchRecap() {
+    const sid = sessionIdRef.current ?? state?.sessionId;
+    if (!sid) return;
+    setRecapLoading(true);
+    fetch(`http://localhost:3001/api/recap/${tableId}/${sid}`)
+      .then(r => r.json())
+      .then(data => { setRecap(data); setRecapOpen(true); })
+      .catch(() => setError("Failed to load session recap."))
+      .finally(() => setRecapLoading(false));
   }
 
   function send(msg: any) { conn?.send(msg); }
@@ -164,6 +190,14 @@ export default function App() {
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
         </div>
       </div>
+
+      {/* ── Reconnect banner ── */}
+      {connStatus === "reconnecting" && (
+        <div className="reconnectBanner">Reconnecting to server...</div>
+      )}
+      {connStatus === "disconnected" && conn && (
+        <div className="reconnectBanner disconnected">Connection lost. Please refresh the page.</div>
+      )}
 
       {/* ── Centered board area ── */}
       <div className="boardArea">
@@ -256,7 +290,16 @@ export default function App() {
       </div>
 
       {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
-      {error && <div className="notice">{error}</div>}
+      {error && (
+        <div className="notice">
+          {error}
+          {error.includes("Session ended") && (
+            <button className="secondary" style={{ marginLeft: 12 }} onClick={fetchRecap} disabled={recapLoading}>
+              {recapLoading ? "Loading..." : "Session Recap"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Oval seat arrangement ── */}
       <div className={`seats seats-${seatCount}`}>
@@ -438,6 +481,28 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* ── Recap modal ── */}
+      {recapOpen && recap && (
+        <div className="recapOverlay" onClick={() => setRecapOpen(false)}>
+          <div className="recapModal" onClick={(e) => e.stopPropagation()}>
+            <div className="title">Session Recap</div>
+            <div style={{ marginTop: 12 }}>
+              <div><b>Date:</b> {recap.date}</div>
+              <div><b>Table:</b> {recap.tableId}</div>
+              <div><b>Session:</b> {recap.sessionId}</div>
+              <div><b>Players:</b> {recap.players?.join(", ") ?? "—"}</div>
+              <div><b>Duration:</b> {recap.durationMin != null ? `${recap.durationMin} minutes` : "Unknown"}</div>
+              <div style={{ marginTop: 10 }}>
+                <div>Hands played: <b>{recap.hands}</b></div>
+                <div>Blind/straddle posts: <b>{recap.posts}</b></div>
+                <div>Player actions: <b>{recap.actions}</b></div>
+              </div>
+            </div>
+            <button style={{ marginTop: 14 }} onClick={() => setRecapOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -311,6 +311,52 @@ input[type="range"] { padding: 0; height: 28px; }
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
+/* ── Recap modal ── */
+.recapOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.recapModal {
+  background: #1a2a22;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 20px;
+  padding: 24px;
+  max-width: 420px;
+  width: 90%;
+  color: #e8e8e8;
+}
+
+/* ── Reconnect banner ── */
+.reconnectBanner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  text-align: center;
+  padding: 10px 16px;
+  background: rgba(212, 160, 23, 0.25);
+  border: 1px solid rgba(212, 160, 23, 0.5);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffd700;
+  animation: reconnectPulse 2s ease-in-out infinite;
+}
+.reconnectBanner.disconnected {
+  background: rgba(122, 45, 45, 0.35);
+  border-color: rgba(200, 60, 60, 0.5);
+  color: #ff6b6b;
+  animation: none;
+}
+@keyframes reconnectPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* ── Responsive ── */
 @media (max-width: 700px) {
   .tableTop { flex-direction: column; align-items: flex-start; }

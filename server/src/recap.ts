@@ -3,14 +3,14 @@ import path from "node:path";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
-type LogEvent = { ts: number; type: string; tableId: string; sessionId: string; payload?: any };
+export type LogEvent = { ts: number; type: string; tableId: string; sessionId: string; payload?: any };
 
-function readJsonl(p: string): LogEvent[] {
+export function readJsonl(p: string): LogEvent[] {
   const lines = fs.readFileSync(p, "utf-8").split(/\r?\n/).filter(Boolean);
   return lines.map(l => JSON.parse(l));
 }
 
-function summarize(events: LogEvent[]) {
+export function summarize(events: LogEvent[]) {
   const started = events.find(e => e.type === "SESSION_STARTED")?.ts;
   const ended = events.find(e => e.type === "SESSION_ENDED")?.ts;
 

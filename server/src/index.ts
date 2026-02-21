@@ -1,10 +1,13 @@
 import express from "express";
 import cors from "cors";
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
 import { WebSocketServer } from "ws";
 import type WebSocket from "ws";
 import { Table } from "./table.js";
 import type { ClientToServer, ServerToClient, TableState } from "./types.js";
+import { readJsonl, summarize } from "./recap.js";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -57,6 +60,26 @@ const app = express();
 app.use(cors());
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+const sessionsDir = path.join(process.cwd(), "data", "sessions");
+
+app.get("/api/sessions/:tableId", (_req, res) => {
+  const dir = path.join(sessionsDir, _req.params.tableId);
+  if (!fs.existsSync(dir)) return res.json([]);
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".jsonl"));
+  const ids = files.map(f => f.replace(".jsonl", ""));
+  res.json(ids);
+});
+
+app.get("/api/recap/:tableId/:sessionId", (_req, res) => {
+  const { tableId, sessionId } = _req.params;
+  const logFile = path.join(sessionsDir, tableId, `${sessionId}.jsonl`);
+  if (!fs.existsSync(logFile)) return res.status(404).json({ error: "Session not found." });
+  const events = readJsonl(logFile);
+  const s = summarize(events);
+  const date = new Date(s.started ?? Date.now()).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  res.json({ tableId, sessionId, date, players: s.joins, durationMin: s.durationMin, hands: s.hands, actions: s.actions, posts: s.posts });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -71,7 +94,23 @@ wss.on("connection", (ws) => {
     try {
       if (msg.type === "HELLO") {
         const table = getOrCreateTable(msg.tableId);
-        const player = table.addPlayer(msg.name);
+
+        let player;
+        if (msg.playerId) {
+          player = table.reconnectPlayer(msg.playerId, msg.name);
+          if (player) {
+            // Remove stale connections for this playerId
+            for (const c of conns) {
+              if (c.playerId === player.id && c.tableId === msg.tableId) {
+                conns.delete(c);
+              }
+            }
+          }
+        }
+        if (!player) {
+          player = table.addPlayer(msg.name);
+        }
+
         current = { ws, tableId: msg.tableId, playerId: player.id };
         conns.add(current);
         send(ws, { type: "WELCOME", youId: player.id, state: redactState(table.state, player.id) });

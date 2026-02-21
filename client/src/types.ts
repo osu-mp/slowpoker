@@ -78,7 +78,7 @@ export type PlayerAction =
   | { kind: "RAISE"; to: number };
 
 export type ClientToServer =
-  | { type: "HELLO"; tableId: string; name: string }
+  | { type: "HELLO"; tableId: string; name: string; playerId?: string }
   | { type: "SET_DEALER"; playerId: string }
   | { type: "SET_STACK"; playerId: string; stack: number }
   | { type: "SET_BLINDS"; smallBlind: number; bigBlind: number; straddleEnabled: boolean }
