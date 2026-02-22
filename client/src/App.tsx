@@ -74,6 +74,10 @@ function seatStyle(index: number, total: number): React.CSSProperties {
   };
 }
 
+type ChipAnim = { id: number; seatIndex: number; amount: number };
+type DealAnim = { id: number; seatIndex: number; cardIndex: number };
+let animIdCounter = 0;
+
 export default function App() {
   const [conn, setConn] = useState<Conn>(null);
   const [tableId, setTableId] = useState("homegame");
@@ -92,10 +96,61 @@ export default function App() {
   const [handHistoryLoading, setHandHistoryLoading] = useState(false);
   const [expandedHand, setExpandedHand] = useState<number | null>(null);
 
+  // Animation state
+  const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
+  const [dealAnimations, setDealAnimations] = useState<DealAnim[]>([]);
+  const [streetFlash, setStreetFlash] = useState<string | null>(null);
+  const prevStateRef = useRef<TableState | null>(null);
+
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
   const bank = useMemo(() => state?.players.find(p => p.id === state.bankPlayerId) ?? null, [state]);
   const currentTurnPlayer = useMemo(() => state ? state.players[state.currentTurnIndex] : null, [state]);
+
+  // Animation detection: diff previous state vs current
+  useEffect(() => {
+    if (!state || !youId) return;
+    const prev = prevStateRef.current;
+    prevStateRef.current = state;
+    if (!prev) return;
+
+    const youIdx = state.players.findIndex(p => p.id === youId);
+    const seats = state.players.map((_, i) =>
+      state.players[(youIdx + i) % state.players.length]
+    );
+
+    // 1. Hand start → card deal animation
+    if (state.handNumber !== prev.handNumber && state.street === "PREFLOP") {
+      const newAnims: DealAnim[] = [];
+      seats.forEach((p, seatIdx) => {
+        if (p.inHand) {
+          newAnims.push({ id: ++animIdCounter, seatIndex: seatIdx, cardIndex: 0 });
+          newAnims.push({ id: ++animIdCounter, seatIndex: seatIdx, cardIndex: 1 });
+        }
+      });
+      setDealAnimations(a => [...a, ...newAnims]);
+    }
+
+    // 2. Bet increases → chip fly animation (skip on hand start to avoid blind-posting clutter)
+    if (state.handNumber === prev.handNumber) {
+      seats.forEach((p, seatIdx) => {
+        const prevP = prev.players.find(pp => pp.id === p.id);
+        if (prevP && p.currentBet > prevP.currentBet) {
+          setChipAnimations(a => [...a, {
+            id: ++animIdCounter,
+            seatIndex: seatIdx,
+            amount: p.currentBet - prevP.currentBet,
+          }]);
+        }
+      });
+    }
+
+    // 3. Street change → flash label
+    if (state.street !== prev.street && ["FLOP", "TURN", "RIVER"].includes(state.street)) {
+      setStreetFlash(streetLabel(state.street));
+      setTimeout(() => setStreetFlash(null), 1500);
+    }
+  }, [state, youId]);
 
   // Tab title: "YOUR TURN" when it's your turn
   useEffect(() => {
@@ -256,6 +311,21 @@ export default function App() {
             </div>
           )}
 
+          <AnimatePresence>
+            {streetFlash && (
+              <motion.div
+                className="streetFlash"
+                key={streetFlash}
+                initial={{ opacity: 0, scale: 1.5, y: -10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                transition={{ type: "spring", stiffness: 300, damping: 18 }}
+              >
+                {streetFlash}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <div className="boardCards">
             <AnimatePresence>
               {state.board.length ? state.board.map((c, i) => (
@@ -297,6 +367,57 @@ export default function App() {
             {" — "}
             {state.roundComplete ? "Betting complete — dealer can advance." : "Betting in progress."}
           </div>
+        </div>
+
+        {/* Animation overlay layer */}
+        <div className="chipAnimationLayer">
+          <AnimatePresence>
+            {chipAnimations.map((chip) => {
+              const angle = (Math.PI / 2) + (chip.seatIndex / seatCount) * 2 * Math.PI;
+              const rx = 44, ry = 40;
+              const startLeft = `${50 - rx * Math.cos(angle)}%`;
+              const startTop = `${50 + ry * Math.sin(angle)}%`;
+              return (
+                <motion.div
+                  key={chip.id}
+                  className="flyingChip"
+                  initial={{ left: startLeft, top: startTop, scale: 1, opacity: 1 }}
+                  animate={{ left: "50%", top: "50%", scale: 0.6, opacity: 0.8 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 200, damping: 22, duration: 0.5 }}
+                  onAnimationComplete={() =>
+                    setChipAnimations(a => a.filter(c => c.id !== chip.id))
+                  }
+                >
+                  {chip.amount}
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
+          <AnimatePresence>
+            {dealAnimations.map((deal) => {
+              const angle = (Math.PI / 2) + (deal.seatIndex / seatCount) * 2 * Math.PI;
+              const rx = 44, ry = 40;
+              const endLeft = `${50 - rx * Math.cos(angle)}%`;
+              const endTop = `${50 + ry * Math.sin(angle)}%`;
+              return (
+                <motion.div
+                  key={deal.id}
+                  className="flyingCard playingCard card-back"
+                  initial={{ left: "50%", top: "50%", scale: 0.5, opacity: 0 }}
+                  animate={{ left: endLeft, top: endTop, scale: 1, opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{
+                    type: "spring", stiffness: 250, damping: 20,
+                    delay: deal.seatIndex * 0.12 + deal.cardIndex * 0.06,
+                  }}
+                  onAnimationComplete={() =>
+                    setDealAnimations(a => a.filter(d => d.id !== deal.id))
+                  }
+                />
+              );
+            })}
+          </AnimatePresence>
         </div>
 
         {/* Seats around the ellipse */}
