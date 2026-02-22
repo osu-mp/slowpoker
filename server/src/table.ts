@@ -50,6 +50,7 @@ export class Table {
       currentTurnIndex: 0,
       roundComplete: true,
       showdownChoices: {},
+      stackRequests: {},
       actionLog: [],
       dealerMessage: "Waiting for dealer to start the hand."
     };
@@ -80,7 +81,7 @@ export class Table {
     const id = nanoid(8);
     const isDealer = this.state.players.length === 0;
     const p: PlayerState = {
-      id, name, isDealer, connected: true,
+      id, name, isDealer, connected: true, sittingOut: false,
       stack: 0,
       inHand: false,
       folded: false,
@@ -130,6 +131,7 @@ export class Table {
     if (!p) throw new Error("No such player.");
     if (!Number.isFinite(stack) || stack < 0) throw new Error("Stack must be a non-negative number.");
     p.stack = Math.floor(stack);
+    delete this.state.stackRequests[targetPlayerId];
     this.pushLog(`Bank set ${p.name}'s stack to ${p.stack}.`);
     appendEvent({ ts: Date.now(), type: "STACK_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: targetPlayerId, stack: p.stack } });
   }
@@ -144,6 +146,29 @@ export class Table {
     this.state.lastRaiseSize = this.state.settings.bigBlind;
     this.pushLog(`Blinds set to ${this.state.settings.smallBlind}/${this.state.settings.bigBlind}${this.state.settings.straddleEnabled ? " with straddle" : ""}.`);
     appendEvent({ ts: Date.now(), type: "BLINDS_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: this.state.settings });
+  }
+
+  setSitOut(playerId: string, sittingOut: boolean) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    if (this.state.street !== "DONE") throw new Error("Cannot change sit-out status during a hand.");
+    p.sittingOut = sittingOut;
+    this.pushLog(`${p.name} is ${sittingOut ? "sitting out" : "back in"}.`);
+    appendEvent({ ts: Date.now(), type: sittingOut ? "SIT_OUT" : "SIT_IN", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
+  requestStack(playerId: string, amount: number) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Amount must be a positive number.");
+    this.state.stackRequests[playerId] = Math.floor(amount);
+    this.pushLog(`${p.name} requests ${Math.floor(amount)} chips.`);
+    appendEvent({ ts: Date.now(), type: "STACK_REQUESTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, amount: Math.floor(amount) } });
+  }
+
+  clearStackRequest(bankId: string, playerId: string) {
+    this.requireBank(bankId);
+    delete this.state.stackRequests[playerId];
   }
 
   private moveChipsToPot(player: PlayerState, amount: number) {
@@ -390,7 +415,7 @@ export class Table {
     this.state.pot = 0;
     this.state.pots = [];
     for (const p of this.state.players) {
-      p.inHand = p.connected;
+      p.inHand = p.connected && !p.sittingOut;
       p.folded = false;
       p.currentBet = 0;
       p.totalBet = 0;

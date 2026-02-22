@@ -7,6 +7,14 @@ import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, 
 type Conn = ReturnType<typeof connect> | null;
 
 const SUIT_GLYPHS: Record<string, string> = { h: "\u2665", d: "\u2666", c: "\u2663", s: "\u2660" };
+const PLAYER_EMOJIS = ["\uD83D\uDC36", "\uD83E\uDD8A", "\uD83D\uDC31", "\uD83D\uDC38", "\uD83E\uDD81", "\uD83D\uDC3C", "\uD83D\uDC28", "\uD83D\uDC2F", "\uD83E\uDD84", "\uD83D\uDC19"];
+function playerEmoji(index: number) { return PLAYER_EMOJIS[index % PLAYER_EMOJIS.length]; }
+function formatCard(c: string) {
+  const rank = c.slice(0, -1);
+  const suitChar = c.slice(-1);
+  const glyph = SUIT_GLYPHS[suitChar] ?? suitChar;
+  return rank + glyph;
+}
 
 function streetLabel(s: Street) {
   switch (s) {
@@ -245,8 +253,8 @@ export default function App() {
     return (
       <div className="table">
         <div className="card">
-          <div className="title">Slow Poker (Prototype v4)</div>
-          <p className="small">Open multiple tabs to simulate multiple players on localhost.</p>
+          <div className="title">Slow Poker</div>
+          <p className="small">Players at this table will appear after you join.</p>
 
           <div className="row" style={{ marginTop: 12 }}>
             <div className="card">
@@ -300,7 +308,7 @@ export default function App() {
           </div>
         </div>
         <div className="hstack">
-          <span className="pill">You: <b>{you?.name}</b></span>
+          <span className="pill">You: <b>{playerEmoji(youIndex)} {you?.name}</b></span>
           <span className="pill">Dealer: <b>{dealer?.name ?? "—"}</b></span>
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
           <button className="secondary" onClick={fetchHandHistory} disabled={handHistoryLoading}>
@@ -460,7 +468,7 @@ export default function App() {
         {seatPlayers.map((p, i) => {
           const isTurn = p.id === state.players[state.currentTurnIndex]?.id && inActiveHand;
           const isFolded = p.inHand && p.folded;
-          const isSittingOut = !p.inHand;
+          const isSittingOut = !p.inHand || p.sittingOut;
           return (
             <div
               key={p.id}
@@ -476,7 +484,7 @@ export default function App() {
             >
               <div>
                 <div>
-                  <b>{p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
+                  <b>{playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
                   {/* Position badges — compare by player ID */}
                   {state.positions && state.street !== "DONE" && (
                     <>
@@ -547,7 +555,13 @@ export default function App() {
               )}
 
               {isBank && (
-                <BankRow player={p} onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })} />
+                <BankRow
+                  player={p}
+                  onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })}
+                  pendingRequest={state.stackRequests[p.id]}
+                  onApprove={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
+                  onDeny={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
+                />
               )}
             </div>
           );
@@ -578,6 +592,18 @@ export default function App() {
         <div className="small">
           Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
         </div>
+        {you?.sittingOut && <span className="pill" style={{ marginTop: 6 }}>Sitting Out</span>}
+        {state.street === "DONE" && (
+          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: you?.sittingOut ? "SIT_IN" : "SIT_OUT" })}>
+            {you?.sittingOut ? "Sit Back In" : "Sit Out"}
+          </button>
+        )}
+        {!isBank && (
+          <ChipRequestPanel
+            currentRequest={youId ? state.stackRequests[youId] : undefined}
+            onRequest={(amount) => send({ type: "REQUEST_STACK", amount })}
+          />
+        )}
       </div>
 
       {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
@@ -609,7 +635,6 @@ export default function App() {
             <button disabled={!isDealer} onClick={() => send({ type: "START_HAND" })}>
               Dealer: Start hand
             </button>
-            <span className="small">Strict turn order betting is live in v4.</span>
           </div>
         )}
 
@@ -645,7 +670,7 @@ export default function App() {
         {state.street === "SHOWDOWN" && (
           <div className="actionBar">
             {!state.showdownChoices[youId] && (
-              <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} />
+              <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} holeCards={you?.holeCards} />
             )}
             {state.showdownChoices[youId] && (
               <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
@@ -831,13 +856,28 @@ function BankControls({ settings, onApply }: { settings: TableState["settings"];
   );
 }
 
-function BankRow({ player, onSetStack }: { player: PlayerState; onSetStack: (stack: number) => void }) {
+function BankRow({ player, onSetStack, pendingRequest, onApprove, onDeny }: {
+  player: PlayerState;
+  onSetStack: (stack: number) => void;
+  pendingRequest?: number;
+  onApprove?: () => void;
+  onDeny?: () => void;
+}) {
   const [val, setVal] = useState(player.stack);
   return (
-    <div className="hstack" style={{ marginTop: 10, gap: 8 }}>
-      <span className="small">Set stack:</span>
-      <input type="number" value={val} onChange={(e) => setVal(Number(e.target.value))} style={{ width: 110 }} />
-      <button className="secondary" onClick={() => onSetStack(val)}>Set</button>
+    <div style={{ marginTop: 10 }}>
+      <div className="hstack" style={{ gap: 8 }}>
+        <span className="small">Set stack:</span>
+        <input type="number" value={val} onChange={(e) => setVal(Number(e.target.value))} style={{ width: 110 }} />
+        <button className="secondary" onClick={() => onSetStack(val)}>Set</button>
+      </div>
+      {pendingRequest != null && (
+        <div className="hstack" style={{ gap: 8, marginTop: 6 }}>
+          <span className="pill">Requests {pendingRequest}</span>
+          <button className="secondary" onClick={() => { onSetStack(player.stack + pendingRequest); onApprove?.(); }}>Approve</button>
+          <button className="secondary danger" onClick={onDeny}>Deny</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -928,14 +968,30 @@ function renderChoice(c: ShowChoice | undefined) {
   return `Show 1 (card ${c.cardIndex === 0 ? "left" : "right"})`;
 }
 
-function ShowdownPanel({ onPick }: { onPick: (c: ShowChoice) => void }) {
+function ChipRequestPanel({ currentRequest, onRequest }: { currentRequest?: number; onRequest: (amount: number) => void }) {
+  const [amount, setAmount] = useState(100);
+  if (currentRequest != null) {
+    return <div className="small" style={{ marginTop: 8 }}>Requested <b>{currentRequest}</b> chips — waiting for bank.</div>;
+  }
+  return (
+    <div className="hstack" style={{ marginTop: 8, gap: 8 }}>
+      <span className="small">Request chips:</span>
+      <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 100 }} />
+      <button className="secondary" onClick={() => onRequest(amount)}>Request</button>
+    </div>
+  );
+}
+
+function ShowdownPanel({ onPick, holeCards }: { onPick: (c: ShowChoice) => void; holeCards?: [string, string] }) {
+  const c0 = holeCards ? formatCard(holeCards[0]) : "?";
+  const c1 = holeCards ? formatCard(holeCards[1]) : "?";
   return (
     <div className="hstack" style={{ gap: 8 }}>
       <span className="small">Your showdown:</span>
-      <button onClick={() => onPick({ kind: "SHOW_0" })}>Show 0</button>
-      <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 0 })}>Show 1 (L)</button>
-      <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 1 })}>Show 1 (R)</button>
-      <button onClick={() => onPick({ kind: "SHOW_2" })}>Show 2</button>
+      <button onClick={() => onPick({ kind: "SHOW_0" })}>Muck</button>
+      <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 0 })}>Show {c0}</button>
+      <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 1 })}>Show {c1}</button>
+      <button onClick={() => onPick({ kind: "SHOW_2" })}>Show Both</button>
     </div>
   );
 }

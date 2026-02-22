@@ -142,6 +142,10 @@ wss.on("connection", (ws) => {
         case "NEXT_STREET": table.nextStreet(current.playerId); break;
         case "SHOWDOWN_CHOICE": table.setShowdownChoice(current.playerId, msg.choice); break;
         case "REVEAL_HAND": table.revealHand(current.playerId); break;
+        case "SIT_OUT": table.setSitOut(current.playerId, true); break;
+        case "SIT_IN": table.setSitOut(current.playerId, false); break;
+        case "REQUEST_STACK": table.requestStack(current.playerId, msg.amount); break;
+        case "CLEAR_STACK_REQUEST": table.clearStackRequest(current.playerId, msg.playerId); break;
         case "END_SESSION":
           table.endSession(current.playerId);
           for (const c of conns) {

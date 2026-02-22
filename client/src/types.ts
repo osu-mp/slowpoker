@@ -16,6 +16,7 @@ export type PlayerState = {
   name: string;
   isDealer: boolean;
   connected: boolean;
+  sittingOut: boolean;
 
   stack: number;
   inHand: boolean;
@@ -64,6 +65,7 @@ export type TableState = {
   roundComplete: boolean;
 
   showdownChoices: Record<string, ShowChoice | undefined>;
+  stackRequests: Record<string, number>;
 
   actionLog: string[];
   dealerMessage?: string;
@@ -131,6 +133,10 @@ export type ClientToServer =
   | { type: "NEXT_STREET" }
   | { type: "SHOWDOWN_CHOICE"; choice: ShowChoice }
   | { type: "REVEAL_HAND" }
+  | { type: "SIT_OUT" }
+  | { type: "SIT_IN" }
+  | { type: "REQUEST_STACK"; amount: number }
+  | { type: "CLEAR_STACK_REQUEST"; playerId: string }
   | { type: "END_SESSION" };
 
 export type ServerToClient =
