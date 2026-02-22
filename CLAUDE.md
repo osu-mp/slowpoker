@@ -63,5 +63,5 @@ No test suite or linter is configured.
 - Chip values are integers
 - Player IDs: 8-char nanoid; Session IDs: 10-char nanoid
 - Action log displays most recent action first
-- Sound effects (low priority) is TODO
-- More complex animations (chip movement to pot, card deal from deck, slide transitions between streets) is TODO (low priority)
+- Sound effects: implemented via Web Audio API synthesis (`client/src/sounds.ts`) — TODO: verify all sounds play correctly in a live session (card deal, chip clink, check tap, fold whoosh, your-turn chime, win arpeggio, street sweep), test mute toggle persistence
+- More complex animations (chip movement to pot, card deal from deck, slide transitions between streets) — DONE

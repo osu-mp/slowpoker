@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary } from "./types";
+import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, playStreetTransition } from "./sounds";
 
 type Conn = ReturnType<typeof connect> | null;
 
@@ -95,6 +96,7 @@ export default function App() {
   const [handHistoryOpen, setHandHistoryOpen] = useState(false);
   const [handHistoryLoading, setHandHistoryLoading] = useState(false);
   const [expandedHand, setExpandedHand] = useState<number | null>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("sp-soundEnabled") !== "false");
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -119,8 +121,9 @@ export default function App() {
       state.players[(youIdx + i) % state.players.length]
     );
 
-    // 1. Hand start → card deal animation
+    // 1. Hand start → card deal animation + sound
     if (state.handNumber !== prev.handNumber && state.street === "PREFLOP") {
+      if (soundEnabled) playCardDeal();
       const newAnims: DealAnim[] = [];
       seats.forEach((p, seatIdx) => {
         if (p.inHand) {
@@ -131,11 +134,13 @@ export default function App() {
       setDealAnimations(a => [...a, ...newAnims]);
     }
 
-    // 2. Bet increases → chip fly animation (skip on hand start to avoid blind-posting clutter)
+    // 2. Bet increases → chip fly animation + sound (skip on hand start to avoid blind-posting clutter)
     if (state.handNumber === prev.handNumber) {
+      let hadBetIncrease = false;
       seats.forEach((p, seatIdx) => {
         const prevP = prev.players.find(pp => pp.id === p.id);
         if (prevP && p.currentBet > prevP.currentBet) {
+          hadBetIncrease = true;
           setChipAnimations(a => [...a, {
             id: ++animIdCounter,
             seatIndex: seatIdx,
@@ -143,14 +148,38 @@ export default function App() {
           }]);
         }
       });
+      if (hadBetIncrease && soundEnabled) playChipBet();
     }
 
-    // 3. Street change → flash label
+    // 3. Street change → flash label + sound
     if (state.street !== prev.street && ["FLOP", "TURN", "RIVER"].includes(state.street)) {
       setStreetFlash(streetLabel(state.street));
       setTimeout(() => setStreetFlash(null), 1500);
+      if (soundEnabled) playStreetTransition();
     }
-  }, [state, youId]);
+
+    // 4. Win banner → sound
+    if (state.winningHandName && !prev.winningHandName) {
+      if (soundEnabled) playWin();
+    }
+
+    // 5. Check/fold detection from action log
+    if (state.actionLog.length > prev.actionLog.length && state.actionLog[0] !== prev.actionLog[0]) {
+      const latest = state.actionLog[0]?.toLowerCase() ?? "";
+      if (soundEnabled) {
+        if (latest.includes("checks")) playCheck();
+        else if (latest.includes("folds")) playFold();
+      }
+    }
+
+    // 6. Your turn → chime
+    const prevTurnId = prev.players[prev.currentTurnIndex]?.id;
+    const currTurnId = state.players[state.currentTurnIndex]?.id;
+    if (currTurnId === youId && prevTurnId !== youId &&
+        state.street !== "DONE" && state.street !== "SHOWDOWN") {
+      if (soundEnabled) playYourTurn();
+    }
+  }, [state, youId, soundEnabled]);
 
   // Tab title: "YOUR TURN" when it's your turn
   useEffect(() => {
@@ -276,6 +305,13 @@ export default function App() {
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
           <button className="secondary" onClick={fetchHandHistory} disabled={handHistoryLoading}>
             {handHistoryLoading ? "Loading..." : "Hand History"}
+          </button>
+          <button className="secondary" onClick={() => {
+            const next = !soundEnabled;
+            setSoundEnabled(next);
+            localStorage.setItem("sp-soundEnabled", String(next));
+          }} title={soundEnabled ? "Mute sounds" : "Unmute sounds"}>
+            {soundEnabled ? "\uD83D\uDD0A" : "\uD83D\uDD07"}
           </button>
         </div>
       </div>
