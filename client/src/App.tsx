@@ -64,6 +64,16 @@ function AnimatedNumber({ value }: { value: number }) {
   return <motion.span>{display}</motion.span>;
 }
 
+function seatStyle(index: number, total: number): React.CSSProperties {
+  const angle = (Math.PI / 2) + (index / total) * 2 * Math.PI;
+  const rx = 44, ry = 40; // ellipse radii as % of container
+  return {
+    position: "absolute",
+    left: `${50 - rx * Math.cos(angle)}%`,
+    top: `${50 + ry * Math.sin(angle)}%`,
+  };
+}
+
 export default function App() {
   const [conn, setConn] = useState<Conn>(null);
   const [tableId, setTableId] = useState("homegame");
@@ -189,6 +199,12 @@ export default function App() {
   const inActiveHand = state.street !== "DONE" && state.street !== "SHOWDOWN";
   const seatCount = state.players.length;
 
+  // Reorder players so "you" is at bottom (index 0), rest clockwise
+  const youIndex = state.players.findIndex(p => p.id === youId);
+  const seatPlayers = state.players.map((_, i) =>
+    state.players[(youIndex + i) % state.players.length]
+  );
+
   return (
     <div className="table">
       {/* ── Top bar ── */}
@@ -217,112 +233,75 @@ export default function App() {
         <div className="reconnectBanner disconnected">Connection lost. Please refresh the page.</div>
       )}
 
-      {/* ── Centered board area ── */}
-      <div className="boardArea">
-        <div className="potDisplay">Pot: <AnimatedNumber value={state.pot} /></div>
+      {/* ── Table ring: seats around an ellipse with board in center ── */}
+      <div className="tableRing">
+        {/* Center: board area */}
+        <div className="ringCenter">
+          <div className="potDisplay">Pot: <AnimatedNumber value={state.pot} /></div>
 
-        {state.pots.length > 0 && (
-          <div className="potBreakdown">
-            {state.pots.map((pot, i) => {
-              const winnerNames = pot.winnerIds?.map(id => state.players.find(p => p.id === id)?.name).filter(Boolean);
-              const isSplit = winnerNames && winnerNames.length > 1;
-              return (
-                <span key={i} className="pill">
-                  {state.pots.length === 1 ? "Main" : i === 0 ? "Main" : `Side #${i}`}: <b>{pot.amount}</b>
-                  {winnerNames && winnerNames.length > 0 && (
-                    <span> → {winnerNames.join(", ")}{isSplit ? " (split)" : ""}{pot.eligiblePlayerIds.length === 1 ? " (uncontested)" : ""}</span>
-                  )}
-                </span>
-              );
-            })}
+          {state.pots.length > 0 && (
+            <div className="potBreakdown">
+              {state.pots.map((pot, i) => {
+                const winnerNames = pot.winnerIds?.map(id => state.players.find(p => p.id === id)?.name).filter(Boolean);
+                const isSplit = winnerNames && winnerNames.length > 1;
+                return (
+                  <span key={i} className="pill">
+                    {state.pots.length === 1 ? "Main" : i === 0 ? "Main" : `Side #${i}`}: <b>{pot.amount}</b>
+                    {winnerNames && winnerNames.length > 0 && (
+                      <span> → {winnerNames.join(", ")}{isSplit ? " (split)" : ""}{pot.eligiblePlayerIds.length === 1 ? " (uncontested)" : ""}</span>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="boardCards">
+            <AnimatePresence>
+              {state.board.length ? state.board.map((c, i) => (
+                <motion.div
+                  key={c}
+                  {...cardFlip}
+                  transition={{ ...cardSpring, delay: i * 0.15 }}
+                  style={{ perspective: 600 }}
+                >
+                  <CardPill c={c} />
+                </motion.div>
+              )) : <span className="small">No board cards yet.</span>}
+            </AnimatePresence>
           </div>
-        )}
 
-        <div className="boardCards">
           <AnimatePresence>
-            {state.board.length ? state.board.map((c, i) => (
+            {state.winningHandName && (
               <motion.div
-                key={c}
-                {...cardFlip}
-                transition={{ ...cardSpring, delay: i * 0.15 }}
-                style={{ perspective: 600 }}
+                className="winBanner"
+                key={state.winningHandName}
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ type: "spring", stiffness: 400, damping: 15 }}
               >
-                <CardPill c={c} />
+                {state.winningHandName}
               </motion.div>
-            )) : <span className="small">No board cards yet.</span>}
+            )}
           </AnimatePresence>
+
+          <div className="boardMeta">
+            Button: <b>{state.positions ? state.players[state.positions.buttonIndex]?.name : "—"}</b> • Blinds: <b>{sb}/{bb}</b>
+            {state.settings.straddleEnabled ? " • Straddle ON" : ""}
+            {" • "}Street bet: <b>{state.streetBet}</b> • Min raise +<b>{state.lastRaiseSize}</b>
+          </div>
+
+          <div className="small" style={{ marginTop: 6 }}>
+            <b>Turn:</b> {currentTurnPlayer?.name ?? "—"}
+            {" — "}
+            {state.roundComplete ? "Betting complete — dealer can advance." : "Betting in progress."}
+          </div>
         </div>
 
-        <AnimatePresence>
-          {state.winningHandName && (
-            <motion.div
-              className="winBanner"
-              key={state.winningHandName}
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.5 }}
-              transition={{ type: "spring", stiffness: 400, damping: 15 }}
-            >
-              {state.winningHandName}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="boardMeta">
-          Button: <b>{state.positions ? state.players[state.positions.buttonIndex]?.name : "—"}</b> • Blinds: <b>{sb}/{bb}</b>
-          {state.settings.straddleEnabled ? " • Straddle ON" : ""}
-          {" • "}Street bet: <b>{state.streetBet}</b> • Min raise +<b>{state.lastRaiseSize}</b>
-        </div>
-
-        <div className="small" style={{ marginTop: 6 }}>
-          <b>Turn:</b> {currentTurnPlayer?.name ?? "—"}
-          {" — "}
-          {state.roundComplete ? "Betting complete — dealer can advance." : "Betting in progress."}
-        </div>
-      </div>
-
-      {/* ── Your hole cards ── */}
-      <div className="holeArea">
-        <div style={{ fontWeight: 600 }}>Your Hand</div>
-        <div className="holeCards">
-          <AnimatePresence mode="wait" key={state.handNumber}>
-            {you?.holeCards ? you.holeCards.map((c, i) => (
-              <motion.div
-                key={c}
-                {...holeFlip}
-                transition={{ ...cardSpring, delay: i * 0.1 }}
-                style={{ perspective: 600 }}
-              >
-                <CardPill c={c} />
-              </motion.div>
-            )) : <span className="small">Start a hand to deal cards.</span>}
-          </AnimatePresence>
-        </div>
-        {you?.bestHand && <span className="pill">{you.bestHand}</span>}
-        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && (
-          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "REVEAL_HAND" })}>Show Cards</button>
-        )}
-        <div className="small">
-          Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
-        </div>
-      </div>
-
-      {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
-      {error && (
-        <div className="notice">
-          {error}
-          {error.includes("Session ended") && (
-            <button className="secondary" style={{ marginLeft: 12 }} onClick={fetchRecap} disabled={recapLoading}>
-              {recapLoading ? "Loading..." : "Session Recap"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* ── Oval seat arrangement ── */}
-      <div className={`seats seats-${seatCount}`}>
-        {state.players.map((p, i) => {
-          const isTurn = i === state.currentTurnIndex && inActiveHand;
+        {/* Seats around the ellipse */}
+        {seatPlayers.map((p, i) => {
+          const isTurn = p.id === state.players[state.currentTurnIndex]?.id && inActiveHand;
           const isFolded = p.inHand && p.folded;
           const isSittingOut = !p.inHand;
           return (
@@ -336,32 +315,31 @@ export default function App() {
                 (isFolded ? " folded" : "") +
                 (isSittingOut && state.street !== "DONE" ? " sitting-out" : "")
               }
+              style={seatStyle(i, seatCount)}
             >
-              <div className="hstack" style={{ justifyContent: "space-between" }}>
+              <div>
                 <div>
-                  <div>
-                    <b>{p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
-                    {/* Position badges */}
-                    {state.positions && state.street !== "DONE" && (
-                      <>
-                        {i === state.positions.buttonIndex && <span className="posBadge btn">BTN</span>}
-                        {i === state.positions.sbIndex && <span className="posBadge sb">SB</span>}
-                        {i === state.positions.bbIndex && <span className="posBadge bb">BB</span>}
-                        {state.positions.straddleIndex !== null && i === state.positions.straddleIndex && <span className="posBadge str">STR</span>}
-                      </>
-                    )}
-                    {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8, fontSize: 10 }}>Bank</span> : null}
-                  </div>
-                  <div className="small">
-                    Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
-                  </div>
+                  <b>{p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
+                  {/* Position badges — compare by player ID */}
+                  {state.positions && state.street !== "DONE" && (
+                    <>
+                      {p.id === state.players[state.positions.buttonIndex]?.id && <span className="posBadge btn">BTN</span>}
+                      {p.id === state.players[state.positions.sbIndex]?.id && <span className="posBadge sb">SB</span>}
+                      {p.id === state.players[state.positions.bbIndex]?.id && <span className="posBadge bb">BB</span>}
+                      {state.positions.straddleIndex !== null && p.id === state.players[state.positions.straddleIndex]?.id && <span className="posBadge str">STR</span>}
+                    </>
+                  )}
+                  {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8, fontSize: 10 }}>Bank</span> : null}
                 </div>
-                {isDealer && !p.isDealer && (
-                  <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: p.id })}>
-                    Make dealer
-                  </button>
-                )}
+                <div className="small">
+                  Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
+                </div>
               </div>
+              {isDealer && !p.isDealer && (
+                <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "SET_DEALER", playerId: p.id })}>
+                  Make dealer
+                </button>
+              )}
 
               {/* Show revealed cards on any street, or showdown status */}
               {p.id !== youId && p.holeCards && state.showdownChoices[p.id]?.kind === "SHOW_2" && state.street !== "SHOWDOWN" && (
@@ -418,6 +396,44 @@ export default function App() {
           );
         })}
       </div>
+
+      {/* ── Your hole cards ── */}
+      <div className="holeArea">
+        <div style={{ fontWeight: 600 }}>Your Hand</div>
+        <div className="holeCards">
+          <AnimatePresence mode="wait" key={state.handNumber}>
+            {you?.holeCards ? you.holeCards.map((c, i) => (
+              <motion.div
+                key={c}
+                {...holeFlip}
+                transition={{ ...cardSpring, delay: i * 0.1 }}
+                style={{ perspective: 600 }}
+              >
+                <CardPill c={c} />
+              </motion.div>
+            )) : <span className="small">Start a hand to deal cards.</span>}
+          </AnimatePresence>
+        </div>
+        {you?.bestHand && <span className="pill">{you.bestHand}</span>}
+        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && (
+          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "REVEAL_HAND" })}>Show Cards</button>
+        )}
+        <div className="small">
+          Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
+        </div>
+      </div>
+
+      {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
+      {error && (
+        <div className="notice">
+          {error}
+          {error.includes("Session ended") && (
+            <button className="secondary" style={{ marginLeft: 12 }} onClick={fetchRecap} disabled={recapLoading}>
+              {recapLoading ? "Loading..." : "Session Recap"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Sticky action bar ── */}
       <div className="actions">
