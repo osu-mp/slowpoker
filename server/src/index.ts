@@ -107,7 +107,7 @@ wss.on("connection", (ws) => {
 
         let player;
         if (msg.playerId) {
-          player = table.reconnectPlayer(msg.playerId, msg.name);
+          player = table.reconnectPlayer(msg.playerId, msg.name, msg.emoji);
           if (player) {
             // Remove stale connections for this playerId
             for (const c of conns) {
@@ -118,7 +118,7 @@ wss.on("connection", (ws) => {
           }
         }
         if (!player) {
-          player = table.addPlayer(msg.name);
+          player = table.addPlayer(msg.name, msg.emoji);
         }
 
         current = { ws, tableId: msg.tableId, playerId: player.id };
@@ -134,14 +134,16 @@ wss.on("connection", (ws) => {
       if (table.ended) return send(ws, { type: "ERROR", message: "Session ended. Refresh to start a new session." });
 
       switch (msg.type) {
+        case "SET_PROFILE": table.setProfile(current.playerId, msg.emoji); break;
         case "SET_DEALER": table.setDealer(msg.playerId); break;
         case "SET_STACK": table.setStack(current.playerId, msg.playerId, msg.stack); break;
+        case "SET_BANK": table.setBank(current.playerId, msg.playerId); break;
         case "SET_BLINDS": table.setBlinds(current.playerId, msg.smallBlind, msg.bigBlind, msg.straddleEnabled); break;
         case "START_HAND": table.startHand(current.playerId); break;
         case "ACT": table.act(current.playerId, msg.action); break;
         case "NEXT_STREET": table.nextStreet(current.playerId); break;
         case "SHOWDOWN_CHOICE": table.setShowdownChoice(current.playerId, msg.choice); break;
-        case "REVEAL_HAND": table.revealHand(current.playerId); break;
+        case "REVEAL_HAND": table.revealHand(current.playerId, msg.choice); break;
         case "SIT_OUT": table.setSitOut(current.playerId, true); break;
         case "SIT_IN": table.setSitOut(current.playerId, false); break;
         case "REQUEST_STACK": table.requestStack(current.playerId, msg.amount); break;

@@ -14,6 +14,7 @@ export type ShowChoice =
 export type PlayerState = {
   id: string;
   name: string;
+  emoji?: string;
   isDealer: boolean;
   connected: boolean;
   sittingOut: boolean;
@@ -100,6 +101,8 @@ export type HandShowdown = {
   playerId: string;
   playerName: string;
   choice: string;
+  cards?: string[];
+  handName?: string;
 };
 
 export type StreetBoard = {
@@ -124,7 +127,8 @@ export type HandSummary = {
 };
 
 export type ClientToServer =
-  | { type: "HELLO"; tableId: string; name: string; playerId?: string }
+  | { type: "HELLO"; tableId: string; name: string; playerId?: string; emoji?: string }
+  | { type: "SET_PROFILE"; emoji: string }
   | { type: "SET_DEALER"; playerId: string }
   | { type: "SET_STACK"; playerId: string; stack: number }
   | { type: "SET_BLINDS"; smallBlind: number; bigBlind: number; straddleEnabled: boolean }
@@ -132,11 +136,12 @@ export type ClientToServer =
   | { type: "ACT"; action: PlayerAction }
   | { type: "NEXT_STREET" }
   | { type: "SHOWDOWN_CHOICE"; choice: ShowChoice }
-  | { type: "REVEAL_HAND" }
+  | { type: "REVEAL_HAND"; choice?: ShowChoice }
   | { type: "SIT_OUT" }
   | { type: "SIT_IN" }
   | { type: "REQUEST_STACK"; amount: number }
   | { type: "CLEAR_STACK_REQUEST"; playerId: string }
+  | { type: "SET_BANK"; playerId: string }
   | { type: "END_SESSION" };
 
 export type ServerToClient =

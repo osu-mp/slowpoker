@@ -6,6 +6,7 @@ export type ConnConfig = {
   tableId: string;
   name: string;
   playerId?: string;
+  emoji?: string;
 };
 
 export function connect(
@@ -28,6 +29,7 @@ export function connect(
       // Send HELLO with playerId for reconnection
       const hello: ClientToServer = { type: "HELLO", tableId: config.tableId, name: config.name };
       if (config.playerId) (hello as any).playerId = config.playerId;
+      if (config.emoji) (hello as any).emoji = config.emoji;
       ws!.send(JSON.stringify(hello));
       // Flush queued messages
       while (queue.length && ws!.readyState === WebSocket.OPEN) {

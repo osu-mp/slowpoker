@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary } from "./types";
@@ -42,6 +42,90 @@ function CardPill({ c }: { c: string }) {
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function Popover({ trigger, children, open, onToggle }: {
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onToggle();
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open, onToggle]);
+
+  return (
+    <div className="popover-anchor" ref={ref}>
+      <div onClick={onToggle}>{trigger}</div>
+      {open && <div className="popover-card">{children}</div>}
+    </div>
+  );
+}
+
+function SeatMenu({ player, isBank, isDealer, isSelf, pendingRequest, onSetStack, onMakeDealer, onMakeBank, onApproveRequest, onDenyRequest }: {
+  player: PlayerState;
+  isBank: boolean;
+  isDealer: boolean;
+  isSelf: boolean;
+  pendingRequest?: number;
+  onSetStack: (stack: number) => void;
+  onMakeDealer: () => void;
+  onMakeBank: () => void;
+  onApproveRequest: () => void;
+  onDenyRequest: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [stackVal, setStackVal] = useState(player.stack);
+  const toggle = useCallback(() => setOpen(o => !o), []);
+
+  const hasActions = isBank || isDealer;
+  if (!hasActions) return null;
+
+  return (
+    <Popover
+      trigger={<button className="seat-gear" title="Seat actions">&#x2699;</button>}
+      open={open}
+      onToggle={toggle}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {isBank && (
+          <>
+            <div className="hstack" style={{ gap: 8 }}>
+              <span className="small">Set stack:</span>
+              <input type="number" value={stackVal} onChange={(e) => setStackVal(Number(e.target.value))} style={{ width: 90 }} />
+              <button className="secondary" onClick={() => { onSetStack(stackVal); setOpen(false); }}>Set</button>
+            </div>
+            {pendingRequest != null && (
+              <div className="hstack" style={{ gap: 8 }}>
+                <span className="pill">Requests {pendingRequest}</span>
+                <button className="secondary" onClick={() => { onSetStack(player.stack + pendingRequest); onApproveRequest(); setOpen(false); }}>Approve</button>
+                <button className="secondary danger" onClick={() => { onDenyRequest(); setOpen(false); }}>Deny</button>
+              </div>
+            )}
+          </>
+        )}
+        {isDealer && !isSelf && (
+          <button className="secondary" onClick={() => { onMakeDealer(); setOpen(false); }}>
+            Make dealer
+          </button>
+        )}
+        {isBank && !isSelf && (
+          <button className="secondary" onClick={() => { onMakeBank(); setOpen(false); }}>
+            Make bank
+          </button>
+        )}
+      </div>
+    </Popover>
+  );
 }
 
 const cardFlip = {
@@ -105,6 +189,17 @@ export default function App() {
   const [handHistoryLoading, setHandHistoryLoading] = useState(false);
   const [expandedHand, setExpandedHand] = useState<number | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("sp-soundEnabled") !== "false");
+  const [blindsOpen, setBlindsOpen] = useState(false);
+  const toggleBlinds = useCallback(() => setBlindsOpen(o => !o), []);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const toggleSettings = useCallback(() => setSettingsOpen(o => !o), []);
+  const [autoShowPref, setAutoShowPref] = useState<"ask" | "muck" | "show">(
+    () => (localStorage.getItem("sp-autoShow") as "ask" | "muck" | "show") ?? "ask"
+  );
+  const autoShowPrefRef = useRef(autoShowPref);
+  useEffect(() => { autoShowPrefRef.current = autoShowPref; }, [autoShowPref]);
+  const [chipPromptOpen, setChipPromptOpen] = useState(false);
+  const [chipPromptAmount, setChipPromptAmount] = useState(200);
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -116,6 +211,7 @@ export default function App() {
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
   const bank = useMemo(() => state?.players.find(p => p.id === state.bankPlayerId) ?? null, [state]);
   const currentTurnPlayer = useMemo(() => state ? state.players[state.currentTurnIndex] : null, [state]);
+  const yourEmoji = you?.emoji ?? playerEmoji(state?.players.findIndex(p => p.id === youId) ?? 0);
 
   // Animation detection: diff previous state vs current
   useEffect(() => {
@@ -201,17 +297,35 @@ export default function App() {
     document.title = isYourTurn ? "YOUR TURN — Slow Poker" : "Slow Poker";
   }, [state, youId, you]);
 
+  // Auto show/muck preference
+  useEffect(() => {
+    if (!state || !youId || !you) return;
+    const pref = autoShowPrefRef.current;
+    if (pref === "ask") return;
+
+    if (state.street === "SHOWDOWN" && you.inHand && !you.folded && !state.showdownChoices[youId]) {
+      send({ type: "SHOWDOWN_CHOICE", choice: pref === "show" ? { kind: "SHOW_2" } : { kind: "SHOW_0" } });
+    }
+    if (state.street === "DONE" && you.holeCards && !state.showdownChoices[youId] && pref === "show") {
+      send({ type: "REVEAL_HAND" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.street, state?.handNumber, youId]);
+
   function join() {
     setError(null);
     const storedPlayerId = localStorage.getItem(`sp-playerId-${tableId}`) ?? undefined;
+    const storedEmoji = localStorage.getItem(`sp-emoji-${tableId}`) ?? undefined;
     const c = connect(
-      { tableId, name, playerId: storedPlayerId },
+      { tableId, name, playerId: storedPlayerId, emoji: storedEmoji },
       (m: ServerToClient) => {
         if (m.type === "WELCOME") {
           setYouId(m.youId);
           setState(m.state);
           localStorage.setItem(`sp-playerId-${tableId}`, m.youId);
           sessionIdRef.current = m.state.sessionId;
+          const me = m.state.players.find(p => p.id === m.youId);
+          if (me && me.stack === 0) setChipPromptOpen(true);
         }
         else if (m.type === "STATE") { setState(m.state); }
         else if (m.type === "ERROR") { setError(m.message); }
@@ -308,7 +422,24 @@ export default function App() {
           </div>
         </div>
         <div className="hstack">
-          <span className="pill">You: <b>{playerEmoji(youIndex)} {you?.name}</b></span>
+          <Popover
+            trigger={<button className="secondary">{yourEmoji} {you?.name} &#x25BE;</button>}
+            open={settingsOpen}
+            onToggle={toggleSettings}
+          >
+            <UserSettingsPopover
+              yourEmoji={yourEmoji}
+              chipRequest={youId ? state.stackRequests[youId] : undefined}
+              onRequest={(amount) => { send({ type: "REQUEST_STACK", amount }); setSettingsOpen(false); }}
+              autoShowPref={autoShowPref}
+              onAutoShowChange={(v) => { setAutoShowPref(v); localStorage.setItem("sp-autoShow", v); }}
+              onEmojiChange={(e) => {
+                localStorage.setItem(`sp-emoji-${tableId}`, e);
+                send({ type: "SET_PROFILE", emoji: e });
+              }}
+              isBank={isBank}
+            />
+          </Popover>
           <span className="pill">Dealer: <b>{dealer?.name ?? "—"}</b></span>
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
           <button className="secondary" onClick={fetchHandHistory} disabled={handHistoryLoading}>
@@ -321,6 +452,18 @@ export default function App() {
           }} title={soundEnabled ? "Mute sounds" : "Unmute sounds"}>
             {soundEnabled ? "\uD83D\uDD0A" : "\uD83D\uDD07"}
           </button>
+          {isBank && (
+            <Popover
+              trigger={<button className="secondary">Blinds {sb}/{bb} &#x2699;</button>}
+              open={blindsOpen}
+              onToggle={toggleBlinds}
+            >
+              <BankControls
+                settings={state.settings}
+                onApply={(sb2, bb2, str) => { send({ type: "SET_BLINDS", smallBlind: sb2, bigBlind: bb2, straddleEnabled: str }); setBlindsOpen(false); }}
+              />
+            </Popover>
+          )}
         </div>
       </div>
 
@@ -332,28 +475,50 @@ export default function App() {
         <div className="reconnectBanner disconnected">Connection lost. Please refresh the page.</div>
       )}
 
+      {/* ── Bank chip-request alert banner ── */}
+      {isBank && Object.keys(state.stackRequests).length > 0 && (
+        <div className="chipAlert">
+          <span>💰 Chip requests:</span>
+          {Object.entries(state.stackRequests).map(([pid, amount]) => {
+            const p = state.players.find(pp => pp.id === pid);
+            return (
+              <span key={pid} className="chipAlertItem">
+                {p?.name}: {amount}
+                <button className="secondary" onClick={() => send({ type: "SET_STACK", playerId: pid, stack: (p?.stack ?? 0) + amount })}>
+                  +{amount}
+                </button>
+                <button className="secondary danger" onClick={() => send({ type: "CLEAR_STACK_REQUEST", playerId: pid })}>✕</button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Table ring: seats around an ellipse with board in center ── */}
       <div className="tableRing">
         {/* Center: board area */}
         <div className="ringCenter">
           <div className="potDisplay">Pot: <AnimatedNumber value={state.pot} /></div>
 
-          {state.pots.length > 0 && (
-            <div className="potBreakdown">
-              {state.pots.map((pot, i) => {
-                const winnerNames = pot.winnerIds?.map(id => state.players.find(p => p.id === id)?.name).filter(Boolean);
-                const isSplit = winnerNames && winnerNames.length > 1;
-                return (
-                  <span key={i} className="pill">
-                    {state.pots.length === 1 ? "Main" : i === 0 ? "Main" : `Side #${i}`}: <b>{pot.amount}</b>
-                    {winnerNames && winnerNames.length > 0 && (
-                      <span> → {winnerNames.join(", ")}{isSplit ? " (split)" : ""}{pot.eligiblePlayerIds.length === 1 ? " (uncontested)" : ""}</span>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
-          )}
+          {(() => {
+            const hasAllIn = state.players.some(p => p.inHand && !p.folded && p.stack === 0);
+            return state.pots.length > 1 && hasAllIn && (
+              <div className="potBreakdown">
+                {state.pots.map((pot, i) => {
+                  const winnerNames = pot.winnerIds?.map(id => state.players.find(p => p.id === id)?.name).filter(Boolean);
+                  const isSplit = winnerNames && winnerNames.length > 1;
+                  return (
+                    <span key={i} className="pill">
+                      {i === 0 ? "Main" : `Side #${i}`}: <b>{pot.amount}</b>
+                      {winnerNames && winnerNames.length > 0 && (
+                        <span> → {winnerNames.join(", ")}{isSplit ? " (split)" : ""}{pot.eligiblePlayerIds.length === 1 ? " (uncontested)" : ""}</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           <AnimatePresence>
             {streetFlash && (
@@ -469,6 +634,10 @@ export default function App() {
           const isTurn = p.id === state.players[state.currentTurnIndex]?.id && inActiveHand;
           const isFolded = p.inHand && p.folded;
           const isSittingOut = !p.inHand || p.sittingOut;
+          const isOtherSeat = p.id !== youId;
+          const showBankOnSeat = isBank;
+          const showDealerOnSeat = isOtherSeat && isDealer && !p.isDealer;
+          const showGear = showBankOnSeat || showDealerOnSeat;
           return (
             <div
               key={p.id}
@@ -482,9 +651,23 @@ export default function App() {
               }
               style={seatStyle(i, seatCount)}
             >
+              {showGear && (
+                <SeatMenu
+                  player={p}
+                  isBank={isBank}
+                  isDealer={isDealer && !p.isDealer}
+                  isSelf={!isOtherSeat}
+                  pendingRequest={state.stackRequests[p.id]}
+                  onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })}
+                  onMakeDealer={() => send({ type: "SET_DEALER", playerId: p.id })}
+                  onMakeBank={() => send({ type: "SET_BANK", playerId: p.id })}
+                  onApproveRequest={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
+                  onDenyRequest={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
+                />
+              )}
               <div>
                 <div>
-                  <b>{playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
+                  <b>{p.emoji ?? playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
                   {/* Position badges — compare by player ID */}
                   {state.positions && state.street !== "DONE" && (
                     <>
@@ -500,11 +683,6 @@ export default function App() {
                   Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
                 </div>
               </div>
-              {isDealer && !p.isDealer && (
-                <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "SET_DEALER", playerId: p.id })}>
-                  Make dealer
-                </button>
-              )}
 
               {/* Show revealed cards on any street, or showdown status */}
               {p.id !== youId && p.holeCards && state.showdownChoices[p.id]?.kind === "SHOW_2" && state.street !== "SHOWDOWN" && (
@@ -553,16 +731,6 @@ export default function App() {
                   )}
                 </div>
               )}
-
-              {isBank && (
-                <BankRow
-                  player={p}
-                  onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })}
-                  pendingRequest={state.stackRequests[p.id]}
-                  onApprove={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
-                  onDeny={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
-                />
-              )}
             </div>
           );
         })}
@@ -586,24 +754,33 @@ export default function App() {
           </AnimatePresence>
         </div>
         {you?.bestHand && <span className="pill">{you.bestHand}</span>}
-        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && (
+        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && state.street !== "DONE" && (
           <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "REVEAL_HAND" })}>Show Cards</button>
+        )}
+        {you?.holeCards && !state.showdownChoices[youId] && state.street === "DONE" && (
+          <div className="hstack" style={{ gap: 6, marginTop: 6 }}>
+            <span className="small">Show?</span>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
+              {formatCard(you.holeCards![0])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
+              {formatCard(you.holeCards![1])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+          </div>
         )}
         <div className="small">
           Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
         </div>
-        {you?.sittingOut && <span className="pill" style={{ marginTop: 6 }}>Sitting Out</span>}
-        {state.street === "DONE" && (
-          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: you?.sittingOut ? "SIT_IN" : "SIT_OUT" })}>
-            {you?.sittingOut ? "Sit Back In" : "Sit Out"}
-          </button>
-        )}
-        {!isBank && (
-          <ChipRequestPanel
-            currentRequest={youId ? state.stackRequests[youId] : undefined}
-            onRequest={(amount) => send({ type: "REQUEST_STACK", amount })}
+        <label className="hstack" style={{ gap: 6, marginTop: 6, cursor: state.street === "DONE" ? "pointer" : "default" }}>
+          <input
+            type="checkbox"
+            checked={!!you?.sittingOut}
+            disabled={state.street !== "DONE"}
+            onChange={(e) => send({ type: e.target.checked ? "SIT_OUT" : "SIT_IN" })}
           />
-        )}
+          <span className="small">Sit out next hand</span>
+        </label>
       </div>
 
       {state.dealerMessage && <div className="notice">{state.dealerMessage}</div>}
@@ -620,16 +797,6 @@ export default function App() {
 
       {/* ── Sticky action bar ── */}
       <div className="actions">
-        {/* Bank controls always visible to bank */}
-        {isBank && (
-          <div className="actionBar" style={{ marginBottom: 8 }}>
-            <BankControls
-              settings={state.settings}
-              onApply={(sb2, bb2, str) => send({ type: "SET_BLINDS", smallBlind: sb2, bigBlind: bb2, straddleEnabled: str })}
-            />
-          </div>
-        )}
-
         {state.street === "DONE" && (
           <div className="actionBar">
             <button disabled={!isDealer} onClick={() => send({ type: "START_HAND" })}>
@@ -790,9 +957,12 @@ export default function App() {
 
                         {h.showdownChoices.length > 0 && (
                           <div style={{ marginTop: 6 }}>
-                            {h.showdownChoices.map((s, i) => (
-                              <div key={i} className="small">{s.playerName}: {s.choice.replace("SHOW_", "Show ").replace("_", " ")}</div>
-                            ))}
+                            {h.showdownChoices.map((s, i) => {
+                              if (s.choice === "SHOW_0") return <div key={i} className="small">{s.playerName}: Mucks</div>;
+                              const cardStr = s.cards?.map(c => formatCard(c)).join(" ") ?? "";
+                              const handStr = s.handName ? ` — ${s.handName}` : "";
+                              return <div key={i} className="small">{s.playerName}: {cardStr}{handStr}</div>;
+                            })}
                           </div>
                         )}
                       </div>
@@ -802,6 +972,29 @@ export default function App() {
               </div>
             )}
             <button style={{ marginTop: 14 }} onClick={() => setHandHistoryOpen(false)}>Close</button>
+          </div>
+        </div>
+      )}
+      {/* ── New player chip prompt ── */}
+      {chipPromptOpen && youId && (
+        <div className="recapOverlay" onClick={() => setChipPromptOpen(false)}>
+          <div className="recapModal" onClick={(e) => e.stopPropagation()}>
+            <div className="title">Welcome to the table!</div>
+            <p className="small">Request starting chips from the bank?</p>
+            <div className="hstack" style={{ gap: 8, marginTop: 12 }}>
+              <input
+                type="number"
+                value={chipPromptAmount}
+                onChange={(e) => setChipPromptAmount(Number(e.target.value))}
+                style={{ width: 100 }}
+              />
+              <button onClick={() => { send({ type: "REQUEST_STACK", amount: chipPromptAmount }); setChipPromptOpen(false); }}>
+                Request from bank
+              </button>
+            </div>
+            <button className="secondary" style={{ marginTop: 8 }} onClick={() => setChipPromptOpen(false)}>
+              Just watch for now
+            </button>
           </div>
         </div>
       )}
@@ -852,32 +1045,6 @@ function BankControls({ settings, onApply }: { settings: TableState["settings"];
         Straddle
       </label>
       <button onClick={() => onApply(sb, bb, str)}>Apply blinds</button>
-    </div>
-  );
-}
-
-function BankRow({ player, onSetStack, pendingRequest, onApprove, onDeny }: {
-  player: PlayerState;
-  onSetStack: (stack: number) => void;
-  pendingRequest?: number;
-  onApprove?: () => void;
-  onDeny?: () => void;
-}) {
-  const [val, setVal] = useState(player.stack);
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div className="hstack" style={{ gap: 8 }}>
-        <span className="small">Set stack:</span>
-        <input type="number" value={val} onChange={(e) => setVal(Number(e.target.value))} style={{ width: 110 }} />
-        <button className="secondary" onClick={() => onSetStack(val)}>Set</button>
-      </div>
-      {pendingRequest != null && (
-        <div className="hstack" style={{ gap: 8, marginTop: 6 }}>
-          <span className="pill">Requests {pendingRequest}</span>
-          <button className="secondary" onClick={() => { onSetStack(player.stack + pendingRequest); onApprove?.(); }}>Approve</button>
-          <button className="secondary danger" onClick={onDeny}>Deny</button>
-        </div>
-      )}
     </div>
   );
 }
@@ -968,16 +1135,50 @@ function renderChoice(c: ShowChoice | undefined) {
   return `Show 1 (card ${c.cardIndex === 0 ? "left" : "right"})`;
 }
 
-function ChipRequestPanel({ currentRequest, onRequest }: { currentRequest?: number; onRequest: (amount: number) => void }) {
-  const [amount, setAmount] = useState(100);
-  if (currentRequest != null) {
-    return <div className="small" style={{ marginTop: 8 }}>Requested <b>{currentRequest}</b> chips — waiting for bank.</div>;
-  }
+function UserSettingsPopover({ yourEmoji, chipRequest, onRequest, autoShowPref, onAutoShowChange, onEmojiChange, isBank }: {
+  yourEmoji: string;
+  chipRequest?: number;
+  onRequest: (amount: number) => void;
+  autoShowPref: "ask" | "muck" | "show";
+  onAutoShowChange: (v: "ask" | "muck" | "show") => void;
+  onEmojiChange: (e: string) => void;
+  isBank: boolean;
+}) {
+  const [chipAmount, setChipAmount] = useState(100);
   return (
-    <div className="hstack" style={{ marginTop: 8, gap: 8 }}>
-      <span className="small">Request chips:</span>
-      <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} style={{ width: 100 }} />
-      <button className="secondary" onClick={() => onRequest(amount)}>Request</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 240 }}>
+      <div>
+        <div className="small" style={{ marginBottom: 6 }}>Avatar</div>
+        <div className="emojiGrid">
+          {PLAYER_EMOJIS.map((e) => (
+            <button key={e} className={`emojiBtn${e === yourEmoji ? " selected" : ""}`} onClick={() => onEmojiChange(e)}>{e}</button>
+          ))}
+        </div>
+      </div>
+      {!isBank && (
+        <div>
+          <div className="small" style={{ marginBottom: 4 }}>Request chips</div>
+          {chipRequest != null ? (
+            <div className="small">⏳ Requested {chipRequest} — waiting for bank.</div>
+          ) : (
+            <div className="hstack" style={{ gap: 6 }}>
+              <input type="number" value={chipAmount} onChange={(e) => setChipAmount(Number(e.target.value))} style={{ width: 80 }} />
+              <button className="secondary" onClick={() => onRequest(chipAmount)}>Request</button>
+            </div>
+          )}
+        </div>
+      )}
+      <div>
+        <div className="small" style={{ marginBottom: 4 }}>After hand (showdown)</div>
+        <div className="hstack" style={{ gap: 8, flexWrap: "wrap" }}>
+          {(["ask", "muck", "show"] as const).map(opt => (
+            <label key={opt} className="hstack" style={{ gap: 4, cursor: "pointer" }}>
+              <input type="radio" name="autoShow" value={opt} checked={autoShowPref === opt} onChange={() => onAutoShowChange(opt)} />
+              <span className="small">{opt === "ask" ? "Ask" : opt === "muck" ? "Auto-muck" : "Auto-show"}</span>
+            </label>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

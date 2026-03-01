@@ -27,6 +27,7 @@ export class Table {
   public state: TableState;
   public ended = false;
   private pendingActors = new Set<string>();
+  private lastButtonIndex = -1;
 
   constructor(public tableId: string) {
     const sessionId = nanoid(10);
@@ -77,11 +78,11 @@ export class Table {
     if (playerId !== this.state.bankPlayerId) throw new Error("Only the Bank can do that.");
   }
 
-  addPlayer(name: string): PlayerState {
+  addPlayer(name: string, emoji?: string): PlayerState {
     const id = nanoid(8);
     const isDealer = this.state.players.length === 0;
     const p: PlayerState = {
-      id, name, isDealer, connected: true, sittingOut: false,
+      id, name, emoji, isDealer, connected: true, sittingOut: false,
       stack: 0,
       inHand: false,
       folded: false,
@@ -100,13 +101,20 @@ export class Table {
     return p;
   }
 
-  reconnectPlayer(playerId: string, name: string): PlayerState | null {
+  reconnectPlayer(playerId: string, name: string, emoji?: string): PlayerState | null {
     const p = this.playerById(playerId);
     if (!p || p.name !== name) return null;
     p.connected = true;
+    if (emoji) p.emoji = emoji;
     this.pushLog(`${p.name} reconnected.`);
     appendEvent({ ts: Date.now(), type: "PLAYER_RECONNECTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
     return p;
+  }
+
+  setProfile(playerId: string, emoji: string) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    p.emoji = emoji;
   }
 
   markDisconnected(playerId: string) {
@@ -123,6 +131,15 @@ export class Table {
     this.state.dealerMessage = `Dealer is now ${p.name}.`;
     this.pushLog(`Dealer changed to ${p.name}.`);
     appendEvent({ ts: Date.now(), type: "DEALER_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
+  setBank(currentBankId: string, newBankId: string) {
+    this.requireBank(currentBankId);
+    const p = this.playerById(newBankId);
+    if (!p) throw new Error("No such player.");
+    this.state.bankPlayerId = newBankId;
+    this.pushLog(`Bank transferred to ${p.name}.`);
+    appendEvent({ ts: Date.now(), type: "BANK_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: newBankId } });
   }
 
   setStack(bankId: string, targetPlayerId: string, stack: number) {
@@ -314,7 +331,7 @@ export class Table {
             const hand = evaluateBest([...wp.holeCards, ...this.state.board]);
             const handStr = hand ? ` — ${hand.name}` : "";
             this.pushLog(`${wp.name} shows ${wp.holeCards[0]} ${wp.holeCards[1]}${handStr}.`);
-            appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: wId, choice: { kind: "SHOW_2" }, auto: true } });
+            appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: wId, choice: { kind: "SHOW_2" }, auto: true, cards: [...wp.holeCards], handName: hand?.name } });
           }
         }
       }
@@ -394,7 +411,7 @@ export class Table {
       this.state.positions = null;
       this.state.streetBet = 0;
       this.state.roundComplete = true;
-      this.state.dealerMessage = "Hand ended (uncontested). Dealer may start next hand.";
+      this.state.dealerMessage = "Hand ended (uncontested). Players may show cards. Dealer: start next hand when ready.";
       return true;
     }
     return false;
@@ -407,8 +424,8 @@ export class Table {
     const withChips = this.state.players.filter(p => p.connected && p.stack > 0);
     if (withChips.length < 2) throw new Error("Need at least 2 players with chips.");
 
-    const prevButton = this.state.positions?.buttonIndex ?? -1;
-    const buttonIndex = prevButton === -1 ? 0 : mod(prevButton + 1, n);
+    const buttonIndex = mod(this.lastButtonIndex + 1, n);
+    this.lastButtonIndex = buttonIndex;
     const sbIndex = mod(buttonIndex + 1, n);
     const bbIndex = mod(buttonIndex + 2, n);
 
@@ -693,17 +710,30 @@ export class Table {
     throw new Error("Streets advance automatically. Dealer only ends the hand from showdown.");
   }
 
-  revealHand(playerId: string) {
+  revealHand(playerId: string, choice: ShowChoice = { kind: "SHOW_2" }) {
     const p = this.playerById(playerId);
     if (!p) throw new Error("No such player.");
     if (!p.holeCards) throw new Error("You have no cards to reveal.");
-    if (this.state.showdownChoices[playerId]?.kind === "SHOW_2") throw new Error("Cards already revealed.");
+    if (this.state.showdownChoices[playerId]) throw new Error("Cards already revealed.");
 
-    this.state.showdownChoices[playerId] = { kind: "SHOW_2" };
-    const hand = evaluateBest([...p.holeCards, ...this.state.board]);
-    const handStr = hand ? ` — ${hand.name}` : "";
-    this.pushLog(`${p.name} reveals ${p.holeCards[0]} ${p.holeCards[1]}${handStr}.`);
-    appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice: { kind: "SHOW_2" }, voluntary: true } });
+    this.state.showdownChoices[playerId] = choice;
+    const hole = p.holeCards;
+    let shownCards: string[] = [];
+    let handName: string | undefined;
+
+    if (choice.kind === "SHOW_2") {
+      shownCards = [...hole];
+      handName = evaluateBest([...hole, ...this.state.board])?.name;
+      const handStr = handName ? ` — ${handName}` : "";
+      this.pushLog(`${p.name} reveals ${hole[0]} ${hole[1]}${handStr}.`);
+    } else if (choice.kind === "SHOW_1") {
+      shownCards = [hole[choice.cardIndex]];
+      handName = evaluateBest([hole[choice.cardIndex], ...this.state.board])?.name;
+      const handStr = handName ? ` — ${handName}` : "";
+      this.pushLog(`${p.name} reveals ${hole[choice.cardIndex]}${handStr}.`);
+    }
+
+    appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice, voluntary: true, cards: shownCards, handName } });
   }
 
   private endHand() {
@@ -728,23 +758,25 @@ export class Table {
     if (this.state.street !== "SHOWDOWN") throw new Error("Not in showdown.");
     this.state.showdownChoices[playerId] = choice;
     const p = this.playerById(playerId);
+    let shownCards: string[] = [];
+    let handName: string | undefined;
     if (p) {
       const hole = p.holeCards;
       if (choice.kind === "SHOW_0") {
         this.pushLog(`${p.name} mucks.`);
       } else if (choice.kind === "SHOW_2" && hole) {
-        const shown = [...hole];
-        const hand = evaluateBest([...shown, ...this.state.board]);
-        const handStr = hand ? ` — ${hand.name}` : "";
+        shownCards = [...hole];
+        handName = evaluateBest([...hole, ...this.state.board])?.name;
+        const handStr = handName ? ` — ${handName}` : "";
         this.pushLog(`${p.name} shows ${hole[0]} ${hole[1]}${handStr}.`);
       } else if (choice.kind === "SHOW_1" && hole) {
-        const shown = [hole[choice.cardIndex]];
-        const hand = evaluateBest([...shown, ...this.state.board]);
-        const handStr = hand ? ` — ${hand.name}` : "";
+        shownCards = [hole[choice.cardIndex]];
+        handName = evaluateBest([hole[choice.cardIndex], ...this.state.board])?.name;
+        const handStr = handName ? ` — ${handName}` : "";
         this.pushLog(`${p.name} shows ${hole[choice.cardIndex]}${handStr}.`);
       }
     }
-    appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice } });
+    appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice, cards: shownCards, handName } });
 
     // Auto-advance to DONE once all eligible players have chosen
     if (this.allShowdownChoicesMade()) {

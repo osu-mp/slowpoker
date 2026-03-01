@@ -21,6 +21,8 @@ export type HandShowdown = {
   playerId: string;
   playerName: string;
   choice: string;
+  cards?: string[];
+  handName?: string;
 };
 
 export type StreetBoard = {
@@ -141,6 +143,8 @@ export function reconstructHands(events: LogEvent[]): HandSummary[] {
         playerId,
         playerName: pname(playerId),
         choice: choice?.kind ?? "UNKNOWN",
+        cards: e.payload.cards,
+        handName: e.payload.handName,
       });
     }
 
