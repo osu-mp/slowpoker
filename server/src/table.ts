@@ -421,8 +421,8 @@ export class Table {
     this.requireDealer(dealerId);
     const n = this.state.players.length;
     if (n < 2) throw new Error("Need at least 2 players.");
-    const withChips = this.state.players.filter(p => p.connected && p.stack > 0);
-    if (withChips.length < 2) throw new Error("Need at least 2 players with chips.");
+    const activePlayers = this.state.players.filter(p => p.connected && !p.sittingOut && p.stack > 0);
+    if (activePlayers.length < 2) throw new Error("Need at least 2 active players with chips (not sitting out).");
 
     const buttonIndex = mod(this.lastButtonIndex + 1, n);
     this.lastButtonIndex = buttonIndex;

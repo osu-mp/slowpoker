@@ -2,15 +2,6 @@
 
 ## P1 — Bugs / Broken behaviour
 
-- **Heads-up SB/BB rules**: In heads-up poker the button *is* the small blind. Currently
-  `sbIndex = mod(buttonIndex + 1, n)`, so in 2-player games the button is the BB and posts
-  last preflop — incorrect. Fix: when `n === 2`, swap so `sbIndex = buttonIndex` and
-  `bbIndex = mod(buttonIndex + 1, n)`.
-
-- **Chip prompt shown to Bank**: The stack=0 prompt appears for the first player (who is also
-  the Bank). The Bank allocates chips to others but shouldn't request from themselves. Skip the
-  prompt (or change the copy) when `me.id === state.bankPlayerId`.
-
 - **ws.ts hardcodes `127.0.0.1:3001`**: Breaks hosted/LAN play. Should derive the WebSocket URL
   from `window.location` so the same build works everywhere. See `HOSTING.md §Serving the Client
   Build from Express` for approach.
@@ -39,16 +30,8 @@
 
 - **Show-cards button at mid-hand SHOWDOWN for folded players**: Folded players see the full
   ShowdownPanel in the action bar (Muck / Show c0 / Show c1 / Both). The redundancy is fine but
-  the holeArea "Show Cards" button that was there previously (show-both only, no single-card
-  option) could be extended to match the DONE panel for consistency.
-
-- **Sit-out checkbox UX during active hand**: The checkbox is disabled while a hand is in progress.
-  Add a tooltip or small label explaining why (e.g. "takes effect after this hand") so it's not
-  confusing.
-
-- **Auto show/muck doesn't cover folded players**: The `useEffect` only fires for `you.inHand &&
-  !you.folded` at SHOWDOWN. If a player folds and has auto-show enabled, they still have to
-  manually click "Show Cards". Extend the effect to cover the folded case.
+  the holeArea "Show Cards" button (show-both only, no single-card option) could be extended to
+  match the DONE panel for consistency.
 
 ## P4 — Features / nice-to-have
 
@@ -58,8 +41,12 @@
 - **Session history panel**: The hand-history modal fetches from the current session. Could add a
   session selector to browse previous sessions from `server/data/sessions/`.
 
-- **Recap improvements**: The session recap shows aggregate stats. Could add per-player chip
-  delta (net win/loss), biggest pot, and longest session.
+- **Per-player chip delta in recap**: The session recap shows aggregate stats. Add per-player
+  net win/loss (chip delta) to the recap output — both the CLI `npm run recap` summary and the
+  in-app session recap modal. Approach: track each player's starting stack at session start
+  (log a STACK_SNAPSHOT event on first join), compare against final stack at session end.
+  Display as `+150` / `-75` next to each player name. Could also surface biggest pot won and
+  number of hands played per player.
 
 - **Mobile layout polish**: The ellipse seat layout requires `min-height: 520px`. On small phones
   the board and seats can overlap. The existing responsive CSS fallback (stacked column) needs
