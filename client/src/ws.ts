@@ -9,6 +9,16 @@ export type ConnConfig = {
   emoji?: string;
 };
 
+function getWsUrl(): string {
+  // Allow an explicit override (e.g. VITE_WS_URL=ws://localhost:3001/ws for dev)
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL as string;
+  // In dev the client (5173) and server (3001) run on different ports
+  if (import.meta.env.DEV) return "ws://localhost:3001/ws";
+  // In production the client is served from the same host/port as the server
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws`;
+}
+
 export function connect(
   config: ConnConfig,
   onMessage: (m: ServerToClient) => void,
@@ -21,7 +31,7 @@ export function connect(
   const queue: ClientToServer[] = [];
 
   function openSocket() {
-    ws = new WebSocket("ws://127.0.0.1:3001/ws");
+    ws = new WebSocket(getWsUrl());
 
     ws.onopen = () => {
       attempt = 0;

@@ -59,6 +59,8 @@ function broadcastState(tableId: string, table: Table) {
 
 const app = express();
 app.use(cors());
+// Tell ngrok (and similar tunnels) to skip the browser interstitial for all responses
+app.use((_req, res, next) => { res.setHeader("ngrok-skip-browser-warning", "1"); next(); });
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const sessionsDir = path.join(process.cwd(), "data", "sessions");
@@ -89,6 +91,13 @@ app.get("/api/hands/:tableId/:sessionId", (_req, res) => {
   const hands = reconstructHands(events);
   res.json(hands);
 });
+
+// Serve client build when present — enables single-port hosting (one tunnel, one URL)
+const clientDist = path.join(__dirname, "../../client/dist");
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get("*", (_req, res) => res.sendFile(path.join(clientDist, "index.html")));
+}
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
