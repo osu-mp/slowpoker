@@ -32,18 +32,23 @@
   (Muck / Show c0 / Show c1 / Both) in the action bar. The holeArea "Show Cards" button only
   shows both — extend it to match the DONE panel (individual card buttons) for consistency.
 
-- **End-of-session summary**: After `END_SESSION`, show a summary modal (and/or enhance `npm run recap`) with
-  biggest chip movements, knockouts (player hit 0), all-in moments (who shoved, who won), biggest pot,
-  hands played per player. Data is all derivable from the JSONL event log. Surface in the in-app recap modal
-  and CLI output.
+- **End-of-session summary** ✓ DONE: Recap modal now shows per-player table (hands, pots won, chips won,
+  final stack), biggest pot of the session, and busted-out players. `STACKS_SNAPSHOT` event logged at
+  session end.
+
+  - **Verify in live session**: end a session, click "Session Recap" — confirm player table, biggest pot,
+    and knockouts appear correctly.
+  - **All-in moments**: not yet detected (no all-in flag in ACTION events). Future: log `ALL_IN` event
+    when a player's stack hits 0 mid-hand.
+  - **Net profit/loss (chip delta)**: requires buy-in tracking — needs a `STACK_SNAPSHOT` on first join
+    or tracking STACK_SET deltas. See P3 below.
 
 ## P3 — Features / nice-to-have
 
-- **Per-player chip delta in recap**: Add net win/loss per player to the session recap — both
-  the CLI `npm run recap` output and the in-app recap modal. Approach: log a `STACK_SNAPSHOT`
-  event on each player's first join (captures starting stack), diff against final stack on
-  `END_SESSION`. Display as `+150` / `-75` next to each player name. Also useful: biggest pot
-  won, hands played per player.
+- **Per-player chip delta (net profit/loss)**: The recap modal already shows "chips won from pots" and
+  "final stack". To show true net profit/loss, log a `STACK_SNAPSHOT` on each player's first STACK_SET
+  (captures buy-in amount), diff against `STACKS_SNAPSHOT` at session end. Display as `+150` / `-75`.
+  Rebuys complicate this — each STACK_SET replaces the whole stack, so need to track the delta per SET.
 
 - **Session history panel**: The hand-history modal shows the current session. Add a session
   selector to browse previous sessions from `server/data/sessions/`.

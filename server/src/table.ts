@@ -790,6 +790,8 @@ export class Table {
     this.requireDealer(dealerId);
     this.ended = true;
     this.pushLog("=== Session ended ===");
+    const stacks = this.state.players.map(p => ({ id: p.id, name: p.name, stack: p.stack }));
+    appendEvent({ ts: Date.now(), type: "STACKS_SNAPSHOT", tableId: this.tableId, sessionId: this.state.sessionId, payload: { stacks } });
     appendEvent({ ts: Date.now(), type: "SESSION_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: {} });
   }
 }

@@ -10,6 +10,21 @@ export function readJsonl(p: string): LogEvent[] {
   return lines.map(l => JSON.parse(l));
 }
 
+export type PlayerStat = {
+  id: string;
+  name: string;
+  handsPlayed: number;
+  potsWon: number;
+  chipsWon: number;
+  finalStack?: number;
+};
+
+export type BiggestPot = {
+  amount: number;
+  winnerNames: string[];
+  handNumber: number;
+};
+
 export function summarize(events: LogEvent[]) {
   const started = events.find(e => e.type === "SESSION_STARTED")?.ts;
   const ended = events.find(e => e.type === "SESSION_ENDED")?.ts;
@@ -21,7 +36,86 @@ export function summarize(events: LogEvent[]) {
 
   const durationMin = started && ended ? Math.round((ended - started) / 60000) : undefined;
 
-  return { started, ended, durationMin, joins, hands, actions, posts };
+  // Build player name map
+  const nameMap = new Map<string, string>();
+  for (const e of events) {
+    if (e.type === "PLAYER_JOINED" && e.payload?.id && e.payload?.name) {
+      nameMap.set(e.payload.id, e.payload.name);
+    }
+  }
+
+  // Final stacks from STACKS_SNAPSHOT
+  const finalStacks = new Map<string, number>();
+  const snapshot = events.find(e => e.type === "STACKS_SNAPSHOT");
+  if (snapshot?.payload?.stacks) {
+    for (const s of snapshot.payload.stacks) {
+      finalStacks.set(s.id, s.stack);
+      if (!nameMap.has(s.id)) nameMap.set(s.id, s.name);
+    }
+  }
+
+  // Per-player stats
+  const statsMap = new Map<string, PlayerStat>();
+  const getOrCreate = (id: string): PlayerStat => {
+    if (!statsMap.has(id)) {
+      statsMap.set(id, { id, name: nameMap.get(id) ?? id, handsPlayed: 0, potsWon: 0, chipsWon: 0 });
+    }
+    return statsMap.get(id)!;
+  };
+
+  // Track which players appeared in each hand (via POST or ACTION)
+  const handPlayers = new Map<number, Set<string>>();
+  let currentHand = 0;
+  for (const e of events) {
+    if (e.type === "HAND_STARTED") currentHand = e.payload?.handNumber ?? currentHand;
+    if ((e.type === "POST" || e.type === "ACTION") && e.payload?.playerId) {
+      if (!handPlayers.has(currentHand)) handPlayers.set(currentHand, new Set());
+      handPlayers.get(currentHand)!.add(e.payload.playerId);
+    }
+  }
+  for (const players of handPlayers.values()) {
+    for (const id of players) getOrCreate(id).handsPlayed++;
+  }
+
+  // Pot awards
+  let biggestPot: BiggestPot | null = null;
+  for (const e of events) {
+    if (e.type === "POT_AWARDED" && e.payload) {
+      const { winnerIds, amount, potIndex } = e.payload;
+      if (!winnerIds || !amount) continue;
+      const handNum: number = e.payload.handNumber ?? 0;
+      // For split pots, credit each winner their share
+      const share = Math.floor(amount / winnerIds.length);
+      for (const wid of winnerIds) {
+        const stat = getOrCreate(wid);
+        if (potIndex === 0) stat.potsWon++; // count main pot only to avoid double-counting
+        stat.chipsWon += share;
+      }
+      if (!biggestPot || amount > biggestPot.amount) {
+        biggestPot = { amount, winnerNames: winnerIds.map((id: string) => nameMap.get(id) ?? id), handNumber: handNum };
+      }
+    }
+    if (e.type === "HAND_WON_UNCONTESTED" && e.payload) {
+      const { winnerId, amount } = e.payload;
+      if (!winnerId || !amount) continue;
+      const stat = getOrCreate(winnerId);
+      stat.potsWon++;
+      stat.chipsWon += amount;
+      if (!biggestPot || amount > biggestPot.amount) {
+        biggestPot = { amount, winnerNames: [nameMap.get(winnerId) ?? winnerId], handNumber: e.payload.handNumber ?? 0 };
+      }
+    }
+  }
+
+  // Apply final stacks and find knockouts
+  for (const [id, stack] of finalStacks) {
+    getOrCreate(id).finalStack = stack;
+  }
+  const knockouts = [...statsMap.values()].filter(s => s.finalStack === 0).map(s => s.name);
+
+  const playerStats = [...statsMap.values()].sort((a, b) => b.chipsWon - a.chipsWon);
+
+  return { started, ended, durationMin, joins, hands, actions, posts, playerStats, biggestPot, knockouts };
 }
 
 function markdown(tableId: string, sessionId: string, s: ReturnType<typeof summarize>) {

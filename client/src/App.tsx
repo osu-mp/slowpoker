@@ -870,17 +870,54 @@ export default function App() {
         <div className="recapOverlay" onClick={() => setRecapOpen(false)}>
           <div className="recapModal" onClick={(e) => e.stopPropagation()}>
             <div className="title">Session Recap</div>
-            <div style={{ marginTop: 12 }}>
-              <div><b>Date:</b> {recap.date}</div>
-              <div><b>Table:</b> {recap.tableId}</div>
-              <div><b>Session:</b> {recap.sessionId}</div>
-              <div><b>Players:</b> {recap.players?.join(", ") ?? "—"}</div>
-              <div><b>Duration:</b> {recap.durationMin != null ? `${recap.durationMin} minutes` : "Unknown"}</div>
-              <div style={{ marginTop: 10 }}>
-                <div>Hands played: <b>{recap.hands}</b></div>
-                <div>Blind/straddle posts: <b>{recap.posts}</b></div>
-                <div>Player actions: <b>{recap.actions}</b></div>
+            <div style={{ marginTop: 12, fontSize: "0.85rem", color: "var(--muted)" }}>
+              <span>{recap.date}</span>
+              {recap.durationMin != null && <span> · {recap.durationMin} min</span>}
+              <span> · {recap.hands} hands</span>
+            </div>
+
+            {/* Player stats table */}
+            {recap.playerStats?.length > 0 && (
+              <div style={{ marginTop: 14, overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--muted)" }}>Player</th>
+                      <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Hands</th>
+                      <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Pots</th>
+                      <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Won</th>
+                      <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Final</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recap.playerStats.map((p: any) => (
+                      <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "5px 8px" }}>{p.name}</td>
+                        <td style={{ textAlign: "right", padding: "5px 8px", color: "var(--muted)" }}>{p.handsPlayed}</td>
+                        <td style={{ textAlign: "right", padding: "5px 8px", color: "var(--muted)" }}>{p.potsWon}</td>
+                        <td style={{ textAlign: "right", padding: "5px 8px", fontWeight: 600 }}>{p.chipsWon > 0 ? `+${p.chipsWon}` : p.chipsWon}</td>
+                        <td style={{ textAlign: "right", padding: "5px 8px", color: p.finalStack === 0 ? "var(--danger, #f44)" : undefined }}>
+                          {p.finalStack != null ? p.finalStack : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
+            )}
+
+            {/* Highlights */}
+            <div style={{ marginTop: 12, fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: 4 }}>
+              {recap.biggestPot && (
+                <div>🏆 Biggest pot: <b>{recap.biggestPot.amount}</b> — {recap.biggestPot.winnerNames.join(", ")} (hand #{recap.biggestPot.handNumber})</div>
+              )}
+              {recap.knockouts?.length > 0 && (
+                <div>💀 Busted out: <b>{recap.knockouts.join(", ")}</b></div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 10, fontSize: "0.75rem", color: "var(--muted)" }}>
+              {recap.posts} posts · {recap.actions} actions · table {recap.tableId}
             </div>
             <button style={{ marginTop: 14 }} onClick={() => setRecapOpen(false)}>Close</button>
           </div>

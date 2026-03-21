@@ -82,7 +82,7 @@ app.get("/api/recap/:tableId/:sessionId", (_req, res) => {
   const events = readJsonl(logFile);
   const s = summarize(events);
   const date = new Date(s.started ?? Date.now()).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  res.json({ tableId, sessionId, date, players: s.joins, durationMin: s.durationMin, hands: s.hands, actions: s.actions, posts: s.posts });
+  res.json({ tableId, sessionId, date, players: s.joins, durationMin: s.durationMin, hands: s.hands, actions: s.actions, posts: s.posts, playerStats: s.playerStats, biggestPot: s.biggestPot, knockouts: s.knockouts });
 });
 
 app.get("/api/hands/:tableId/:sessionId", (_req, res) => {
