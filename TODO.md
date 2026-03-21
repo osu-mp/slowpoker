@@ -12,6 +12,12 @@
   that returns a JSON list of active tables (id, player count, last activity, hand number).
   Lets you see what's running and call `DELETE /admin/table/:id` to nuke one manually.
 
+## P1 — Deployment (continued)
+
+- **Verify admin panel in live session**: Set `ADMIN_TOKEN` env var, visit `/admin?token=...`, confirm
+  table list shows, idle badge appears after inactivity, Kill button removes table. Test that idle cleanup
+  fires after 30 min with no connections.
+
 ## P2 — UX / polish (medium priority)
 
 - **Sound effects live-session verification**: Confirm all seven events play correctly — card deal,
@@ -25,6 +31,11 @@
 - **Show-cards panel consistency**: At mid-hand SHOWDOWN, folded players see the ShowdownPanel
   (Muck / Show c0 / Show c1 / Both) in the action bar. The holeArea "Show Cards" button only
   shows both — extend it to match the DONE panel (individual card buttons) for consistency.
+
+- **End-of-session summary**: After `END_SESSION`, show a summary modal (and/or enhance `npm run recap`) with
+  biggest chip movements, knockouts (player hit 0), all-in moments (who shoved, who won), biggest pot,
+  hands played per player. Data is all derivable from the JSONL event log. Surface in the in-app recap modal
+  and CLI output.
 
 ## P3 — Features / nice-to-have
 

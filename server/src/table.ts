@@ -26,6 +26,7 @@ function isAllIn(p: PlayerState) {
 export class Table {
   public state: TableState;
   public ended = false;
+  public lastActivityAt: number = Date.now();
   private pendingActors = new Set<string>();
   private lastButtonIndex = -1;
 

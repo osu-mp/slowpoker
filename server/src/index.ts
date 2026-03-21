@@ -9,6 +9,7 @@ import { Table } from "./table.js";
 import type { ClientToServer, ServerToClient, TableState } from "./types.js";
 import { readJsonl, summarize } from "./recap.js";
 import { reconstructHands } from "./handHistory.js";
+import { registerAdminRoutes } from "./admin.js";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -50,6 +51,7 @@ function send(ws: WebSocket, msg: ServerToClient) {
 }
 
 function broadcastState(tableId: string, table: Table) {
+  table.lastActivityAt = Date.now();
   for (const c of conns) {
     if (c.tableId === tableId) {
       c.ws.send(JSON.stringify({ type: "STATE", state: redactState(table.state, c.playerId) } as ServerToClient));
@@ -91,6 +93,11 @@ app.get("/api/hands/:tableId/:sessionId", (_req, res) => {
   const hands = reconstructHands(events);
   res.json(hands);
 });
+
+// Admin panel (requires ADMIN_TOKEN env var)
+const adminRouter = express.Router();
+registerAdminRoutes(adminRouter, tables, conns);
+app.use("/admin", adminRouter);
 
 // Serve client build when present — enables single-port hosting (one tunnel, one URL)
 const clientDist = path.join(__dirname, "../../client/dist");
@@ -183,5 +190,17 @@ wss.on("connection", (ws) => {
     conns.delete(current);
   });
 });
+
+// Idle table cleanup — remove tables with no connected players and no activity for 30 min
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [id, table] of tables) {
+    const hasConnected = [...conns].some(c => c.tableId === id);
+    if (!hasConnected && table.lastActivityAt < cutoff) {
+      tables.delete(id);
+      console.log(`[cleanup] Removed idle table ${id}`);
+    }
+  }
+}, 5 * 60 * 1000);
 
 server.listen(PORT, () => console.log(`Slow Poker server listening on http://localhost:${PORT}`));
