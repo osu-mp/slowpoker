@@ -25,6 +25,13 @@ export type BiggestPot = {
   handNumber: number;
 };
 
+export type AllInMoment = {
+  playerName: string;
+  street: string;
+  amount?: number;
+  handNumber: number;
+};
+
 export function summarize(events: LogEvent[]) {
   const started = events.find(e => e.type === "SESSION_STARTED")?.ts;
   const ended = events.find(e => e.type === "SESSION_ENDED")?.ts;
@@ -63,14 +70,23 @@ export function summarize(events: LogEvent[]) {
     return statsMap.get(id)!;
   };
 
-  // Track which players appeared in each hand (via POST or ACTION)
+  // Track which players appeared in each hand (via POST or ACTION), and detect all-in moments
   const handPlayers = new Map<number, Set<string>>();
+  const allIns: AllInMoment[] = [];
   let currentHand = 0;
   for (const e of events) {
     if (e.type === "HAND_STARTED") currentHand = e.payload?.handNumber ?? currentHand;
     if ((e.type === "POST" || e.type === "ACTION") && e.payload?.playerId) {
       if (!handPlayers.has(currentHand)) handPlayers.set(currentHand, new Set());
       handPlayers.get(currentHand)!.add(e.payload.playerId);
+    }
+    if (e.payload?.allIn && e.payload.playerId) {
+      allIns.push({
+        playerName: nameMap.get(e.payload.playerId) ?? e.payload.playerId,
+        street: e.type === "POST" ? "PREFLOP" : (e.payload.street ?? "PREFLOP"),
+        amount: e.payload.to ?? e.payload.amount,
+        handNumber: currentHand,
+      });
     }
   }
   for (const players of handPlayers.values()) {
@@ -115,7 +131,7 @@ export function summarize(events: LogEvent[]) {
 
   const playerStats = [...statsMap.values()].sort((a, b) => b.chipsWon - a.chipsWon);
 
-  return { started, ended, durationMin, joins, hands, actions, posts, playerStats, biggestPot, knockouts };
+  return { started, ended, durationMin, joins, hands, actions, posts, playerStats, biggestPot, knockouts, allIns };
 }
 
 function markdown(tableId: string, sessionId: string, s: ReturnType<typeof summarize>) {

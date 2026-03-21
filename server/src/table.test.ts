@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Table } from "./table.js";
+import { appendEvent } from "./logger.js";
 
 // Mock the logger so tests don't write to disk
 vi.mock("./logger.js", () => ({
@@ -808,5 +809,142 @@ describe("integration: full hand", () => {
     // Total stacks should equal starting total (200 * 3 = 600)
     const totalStacks = table.state.players.reduce((s, p) => s + p.stack, 0);
     expect(totalStacks).toBe(600);
+  });
+});
+
+// Helper: get all ACTION event payloads that appendEvent was called with
+function actionPayloads() {
+  return vi.mocked(appendEvent).mock.calls
+    .map(([e]) => e)
+    .filter(e => e.type === "ACTION")
+    .map(e => e.payload);
+}
+
+function postPayloads() {
+  return vi.mocked(appendEvent).mock.calls
+    .map(([e]) => e)
+    .filter(e => e.type === "POST")
+    .map(e => e.payload);
+}
+
+describe("all-in event detection", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // 3-player: P0=dealer/UTG, P1=SB, P2=BB
+  // Give P0 exactly 2 chips so CALL vs BB(2) empties stack
+  it("CALL that empties stack: ACTION payload has allIn=true", () => {
+    const { table, playerIds, dealerId } = createTable(3, 100);
+    table.setStack(dealerId, playerIds[0], 2);
+    table.startHand(dealerId);
+    vi.clearAllMocks(); // clear blind posts; focus on the action
+
+    // P0 (UTG) has 2 chips total; SB(1) not paid yet, streetBet=2
+    // P0 calls BB: puts in 2 chips → stack 0
+    const cp = currentPlayer(table);
+    expect(table.state.players.find(p => p.id === cp)!.id).toBe(playerIds[0]);
+    table.act(cp, { kind: "CALL" });
+
+    const allInAction = actionPayloads().find(p => p?.allIn === true);
+    expect(allInAction).toBeDefined();
+    expect(allInAction?.action.kind).toBe("CALL");
+  });
+
+  it("RAISE that empties stack: ACTION payload has allIn=true", () => {
+    const { table, playerIds, dealerId } = createTable(3, 100);
+    table.setStack(dealerId, playerIds[0], 10);
+    table.startHand(dealerId);
+    vi.clearAllMocks();
+
+    // P0 has 10 chips; shoves all-in
+    table.act(currentPlayer(table), { kind: "RAISE", to: 999 });
+
+    const allInAction = actionPayloads().find(p => p?.allIn === true);
+    expect(allInAction).toBeDefined();
+    expect(allInAction?.action.kind).toBe("RAISE");
+  });
+
+  it("BET that empties stack on the flop: ACTION payload has allIn=true", () => {
+    // Give P0 enough to limp to flop but not much more
+    const { table, playerIds, dealerId } = createTable(3, 100);
+    table.setStack(dealerId, playerIds[0], 10);
+    table.startHand(dealerId);
+
+    // Preflop: P0 calls, P1 calls, P2 checks → FLOP
+    table.act(currentPlayer(table), { kind: "CALL" }); // P0 UTG calls
+    table.act(currentPlayer(table), { kind: "CALL" }); // P1 SB calls
+    table.act(currentPlayer(table), { kind: "CHECK" }); // P2 BB checks
+    expect(table.state.street).toBe("FLOP");
+
+    vi.clearAllMocks();
+    // P0 bets all remaining chips on the flop
+    table.act(currentPlayer(table), { kind: "BET", to: 999 });
+
+    const allInAction = actionPayloads().find(p => p?.allIn === true);
+    expect(allInAction).toBeDefined();
+    expect(allInAction?.action.kind).toBe("BET");
+  });
+
+  it("non-all-in CALL does NOT have allIn in payload", () => {
+    const { table, dealerId } = createTable(3, 100);
+    table.startHand(dealerId);
+    vi.clearAllMocks();
+
+    // P0 calls with plenty of chips — no all-in
+    table.act(currentPlayer(table), { kind: "CALL" });
+
+    const actions = actionPayloads();
+    expect(actions.length).toBeGreaterThan(0);
+    expect(actions.every(p => !p?.allIn)).toBe(true);
+  });
+
+  it("non-all-in RAISE does NOT have allIn in payload", () => {
+    const { table, dealerId } = createTable(3, 100);
+    table.startHand(dealerId);
+    vi.clearAllMocks();
+
+    table.act(currentPlayer(table), { kind: "RAISE", to: 10 });
+
+    const allInActions = actionPayloads().filter(p => p?.allIn === true);
+    expect(allInActions).toHaveLength(0);
+  });
+
+  it("blind post that empties stack: POST payload has allIn=true", () => {
+    // 3-player: P0=dealer, P1=SB. Give P1 exactly 1 chip = SB amount
+    const { table, playerIds, dealerId } = createTable(3, 100);
+    table.setStack(dealerId, playerIds[1], 1); // P1 (SB) has exactly 1 chip
+    table.startHand(dealerId);
+
+    // P1 posted SB=1, stack→0 → allIn:true in POST event
+    const allInPost = postPayloads().find(p => p?.allIn === true);
+    expect(allInPost).toBeDefined();
+    expect(allInPost?.label).toBe("SB");
+    expect(allInPost?.playerId).toBe(playerIds[1]);
+  });
+
+  it("normal blind post does NOT have allIn in payload", () => {
+    const { table, dealerId } = createTable(3, 100);
+    table.startHand(dealerId);
+
+    const posts = postPayloads();
+    expect(posts.length).toBeGreaterThan(0);
+    expect(posts.every(p => !p?.allIn)).toBe(true);
+  });
+
+  it("all-in flag is present in ACTION for all action kinds that can go all-in", () => {
+    // Verify FOLD and CHECK never produce allIn (they don't change stack)
+    const { table, dealerId } = createTable(2, 100);
+    table.startHand(dealerId);
+    vi.clearAllMocks();
+
+    // CALL to get to flop, then CHECK
+    table.act(currentPlayer(table), { kind: "CALL" });
+    if (table.state.street === "PREFLOP") table.act(currentPlayer(table), { kind: "CHECK" });
+    if (table.state.street === "FLOP") {
+      table.act(currentPlayer(table), { kind: "CHECK" });
+      table.act(currentPlayer(table), { kind: "CHECK" });
+    }
+
+    const allInActions = actionPayloads().filter(p => p?.allIn === true);
+    expect(allInActions).toHaveLength(0);
   });
 });

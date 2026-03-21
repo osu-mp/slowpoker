@@ -363,7 +363,7 @@ export class Table {
   private postBlind(player: PlayerState, amount: number, label: string) {
     const paid = this.moveChipsToPot(player, amount);
     this.pushLog(`${player.name} posts ${label} ${paid}.`);
-    appendEvent({ ts: Date.now(), type: "POST", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: player.id, label, amount: paid } });
+    appendEvent({ ts: Date.now(), type: "POST", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: player.id, label, amount: paid, ...(player.stack === 0 ? { allIn: true } : {}) } });
   }
 
   private nextToActFrom(startIndex: number): number {
@@ -502,7 +502,7 @@ export class Table {
 
     const logAct = (line: string, extra?: any) => {
       this.pushLog(line);
-      appendEvent({ ts: Date.now(), type: "ACTION", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, street: this.state.street, action, ...extra } });
+      appendEvent({ ts: Date.now(), type: "ACTION", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, street: this.state.street, action, ...extra, ...(p.stack === 0 ? { allIn: true } : {}) } });
     };
 
     const advanceOrComplete = () => {
@@ -656,6 +656,11 @@ export class Table {
       this.returnUnclaimedChips();
       this.updatePots();
       this.autoEvaluateAndAwardPots();
+      // If auto-eval showed all players (e.g. all-in tie), end hand immediately
+      if (this.allShowdownChoicesMade()) {
+        this.endHand();
+        return false;
+      }
       this.state.dealerMessage = "Showdown: pots awarded. Choose Show 0/1/2, then dealer ends hand.";
       this.state.roundComplete = true;
     } else {

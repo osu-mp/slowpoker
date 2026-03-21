@@ -914,6 +914,16 @@ export default function App() {
               {recap.knockouts?.length > 0 && (
                 <div>💀 Busted out: <b>{recap.knockouts.join(", ")}</b></div>
               )}
+              {recap.allIns?.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>All-ins ({recap.allIns.length})</div>
+                  {recap.allIns.map((ai: any, i: number) => (
+                    <div key={i} style={{ color: "var(--muted)", paddingLeft: 8 }}>
+                      Hand #{ai.handNumber} · {ai.street} · <b>{ai.playerName}</b>{ai.amount ? ` for ${ai.amount}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ marginTop: 10, fontSize: "0.75rem", color: "var(--muted)" }}>

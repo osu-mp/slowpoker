@@ -37,9 +37,10 @@
   session end.
 
   - **Verify in live session**: end a session, click "Session Recap" — confirm player table, biggest pot,
-    and knockouts appear correctly.
-  - **All-in moments**: not yet detected (no all-in flag in ACTION events). Future: log `ALL_IN` event
-    when a player's stack hits 0 mid-hand.
+    knockouts, and all-in list appear correctly.
+  - **All-in moments** ✓ DONE: `allIn: true` flag added to ACTION (CALL/BET/RAISE) and POST events
+    when a player's stack hits 0. Recap modal shows an "All-ins (N)" list with hand#, street, player, amount.
+    Verify in live session: all-in actions appear in the recap modal correctly.
   - **Net profit/loss (chip delta)**: requires buy-in tracking — needs a `STACK_SNAPSHOT` on first join
     or tracking STACK_SET deltas. See P3 below.
 
