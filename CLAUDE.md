@@ -12,11 +12,12 @@ SlowPoker is a full-stack web-based poker game (Prototype v4) for home games wit
 # Install dependencies (from root)
 npm install
 
-# Run server (port 3001, hot-reload via tsx)
-npm run dev:server
+# Run both server and client together (Ctrl+C kills both)
+npm run dev
 
-# Run client (port 5173, Vite dev server)
-npm run dev:client
+# Run individually
+npm run dev:server   # port 3001, hot-reload via tsx
+npm run dev:client   # port 5173, Vite dev server
 
 # Production build
 cd server && npm run build && npm start

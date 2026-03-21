@@ -1,9 +1,16 @@
 {
   "name": "slow-poker",
   "private": true,
-  "workspaces": ["server", "client"],
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
