@@ -148,10 +148,11 @@ export class Table {
     const p = this.playerById(targetPlayerId);
     if (!p) throw new Error("No such player.");
     if (!Number.isFinite(stack) || stack < 0) throw new Error("Stack must be a non-negative number.");
+    const before = p.stack;
     p.stack = Math.floor(stack);
     delete this.state.stackRequests[targetPlayerId];
     this.pushLog(`Bank set ${p.name}'s stack to ${p.stack}.`);
-    appendEvent({ ts: Date.now(), type: "STACK_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: targetPlayerId, stack: p.stack } });
+    appendEvent({ ts: Date.now(), type: "STACK_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: targetPlayerId, stack: p.stack, before } });
   }
 
   setBlinds(bankId: string, smallBlind: number, bigBlind: number, straddleEnabled: boolean) {

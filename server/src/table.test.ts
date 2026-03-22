@@ -545,13 +545,16 @@ describe("multi-way all-ins", () => {
       table.act(currentPlayer(table), { kind: "CALL" });
     }
 
-    // Should auto-advance all the way to SHOWDOWN (no manual street advances needed)
-    expect(table.state.street).toBe("SHOWDOWN");
-    expect(table.state.board).toHaveLength(5); // Full board dealt
+    // Full board should be dealt and game at SHOWDOWN or DONE
+    // (DONE if all players were auto-shown, e.g. in a tie; SHOWDOWN if loser hasn't revealed)
+    expect(table.state.board).toHaveLength(5);
+    expect(["SHOWDOWN", "DONE"]).toContain(table.state.street);
 
-    for (const p of table.state.players) {
-      if (p.inHand && !p.folded && !table.state.showdownChoices[p.id]) {
-        table.setShowdownChoice(p.id, { kind: "SHOW_2" });
+    if (table.state.street === "SHOWDOWN") {
+      for (const p of table.state.players) {
+        if (p.inHand && !p.folded && !table.state.showdownChoices[p.id]) {
+          table.setShowdownChoice(p.id, { kind: "SHOW_2" });
+        }
       }
     }
     expect(table.state.street).toBe("DONE");

@@ -2,19 +2,7 @@
 
 ## P1 — Deployment (do before next hosted game)
 
-- **Idle table cleanup**: Tables accumulate in memory indefinitely — any random URL path creates
-  a new Table that never gets removed. Add a `setInterval` (every 5 min) that deletes tables
-  where `connectedPlayerCount === 0` and `lastActivityAt` is older than 30 minutes. Add a
-  `lastActivityAt: number` timestamp to Table, updated on every action/connection event.
-  This prevents zombie games without needing a UI admin tool.
-
-  Optional extension: a lightweight `/admin` route (guarded by a secret env var `ADMIN_TOKEN`)
-  that returns a JSON list of active tables (id, player count, last activity, hand number).
-  Lets you see what's running and call `DELETE /admin/table/:id` to nuke one manually.
-
-## P1 — Deployment (continued)
-
-- **Verify admin panel in live session**: Set `ADMIN_TOKEN` env var, visit `/admin?token=...`, confirm
+- **Verify admin panel in live session** ✓ built: Set `ADMIN_TOKEN` env var, visit `/admin?token=...`, confirm
   table list shows, idle badge appears after inactivity, Kill button removes table. Test that idle cleanup
   fires after 30 min with no connections.
 

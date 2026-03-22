@@ -17,6 +17,7 @@ export type PlayerStat = {
   potsWon: number;
   chipsWon: number;
   finalStack?: number;
+  chipDelta?: number;
 };
 
 export type BiggestPot = {
@@ -58,6 +59,15 @@ export function summarize(events: LogEvent[]) {
     for (const s of snapshot.payload.stacks) {
       finalStacks.set(s.id, s.stack);
       if (!nameMap.has(s.id)) nameMap.set(s.id, s.name);
+    }
+  }
+
+  // Track bank-given chips per player from STACK_SET events (stack - before = delta from bank)
+  const bankGivenMap = new Map<string, number>();
+  for (const e of events) {
+    if (e.type === "STACK_SET" && e.payload?.playerId != null && e.payload.stack != null) {
+      const delta = e.payload.before != null ? e.payload.stack - e.payload.before : e.payload.stack;
+      bankGivenMap.set(e.payload.playerId, (bankGivenMap.get(e.payload.playerId) ?? 0) + delta);
     }
   }
 
@@ -123,9 +133,12 @@ export function summarize(events: LogEvent[]) {
     }
   }
 
-  // Apply final stacks and find knockouts
+  // Apply final stacks, chip deltas, and find knockouts
   for (const [id, stack] of finalStacks) {
-    getOrCreate(id).finalStack = stack;
+    const stat = getOrCreate(id);
+    stat.finalStack = stack;
+    const bankGiven = bankGivenMap.get(id);
+    if (bankGiven != null) stat.chipDelta = stack - bankGiven;
   }
   const knockouts = [...statsMap.values()].filter(s => s.finalStack === 0).map(s => s.name);
 

@@ -325,7 +325,7 @@ export default function App() {
           localStorage.setItem(`sp-playerId-${tableId}`, m.youId);
           sessionIdRef.current = m.state.sessionId;
           const me = m.state.players.find(p => p.id === m.youId);
-          if (me && me.stack === 0) setChipPromptOpen(true);
+          if (me && me.stack === 0 && !sessionStorage.getItem(`sp-chip-prompted-${tableId}`)) setChipPromptOpen(true);
         }
         else if (m.type === "STATE") { setState(m.state); }
         else if (m.type === "ERROR") { setError(m.message); }
@@ -755,7 +755,16 @@ export default function App() {
         </div>
         {you?.bestHand && <span className="pill">{you.bestHand}</span>}
         {you?.folded && you?.holeCards && !state.showdownChoices[youId] && state.street !== "DONE" && (
-          <button className="secondary" style={{ marginTop: 6 }} onClick={() => send({ type: "REVEAL_HAND" })}>Show Cards</button>
+          <div className="hstack" style={{ gap: 6, marginTop: 6 }}>
+            <span className="small">Show?</span>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
+              {formatCard(you.holeCards![0])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
+              {formatCard(you.holeCards![1])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+          </div>
         )}
         {you?.holeCards && !state.showdownChoices[youId] && state.street === "DONE" && (
           <div className="hstack" style={{ gap: 6, marginTop: 6 }}>
@@ -887,6 +896,7 @@ export default function App() {
                       <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Pots</th>
                       <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Won</th>
                       <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Final</th>
+                      <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)" }}>Net</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -898,6 +908,9 @@ export default function App() {
                         <td style={{ textAlign: "right", padding: "5px 8px", fontWeight: 600 }}>{p.chipsWon > 0 ? `+${p.chipsWon}` : p.chipsWon}</td>
                         <td style={{ textAlign: "right", padding: "5px 8px", color: p.finalStack === 0 ? "var(--danger, #f44)" : undefined }}>
                           {p.finalStack != null ? p.finalStack : "—"}
+                        </td>
+                        <td style={{ textAlign: "right", padding: "5px 8px", fontWeight: 600, color: p.chipDelta == null ? "var(--muted)" : p.chipDelta >= 0 ? "#5c9" : "#f66" }}>
+                          {p.chipDelta != null ? (p.chipDelta >= 0 ? `+${p.chipDelta}` : p.chipDelta) : "—"}
                         </td>
                       </tr>
                     ))}
@@ -1035,11 +1048,11 @@ export default function App() {
                 onChange={(e) => setChipPromptAmount(Number(e.target.value))}
                 style={{ width: 100 }}
               />
-              <button onClick={() => { send({ type: "REQUEST_STACK", amount: chipPromptAmount }); setChipPromptOpen(false); }}>
+              <button onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${tableId}`, "1"); send({ type: "REQUEST_STACK", amount: chipPromptAmount }); setChipPromptOpen(false); }}>
                 Request from bank
               </button>
             </div>
-            <button className="secondary" style={{ marginTop: 8 }} onClick={() => setChipPromptOpen(false)}>
+            <button className="secondary" style={{ marginTop: 8 }} onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${tableId}`, "1"); setChipPromptOpen(false); }}>
               Just watch for now
             </button>
           </div>

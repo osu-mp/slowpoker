@@ -326,6 +326,8 @@ input[type="range"] { padding: 0; height: 28px; }
   padding: 24px;
   max-width: 420px;
   width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
   color: #e8e8e8;
 }
 
