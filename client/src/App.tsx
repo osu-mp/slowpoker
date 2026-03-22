@@ -890,11 +890,13 @@ export default function App() {
       {/* ── Sticky action bar ── */}
       <div className="actions">
         {state.street === "DONE" && (
-          <div className="actionBar">
-            <button disabled={!isDealer} onClick={() => send({ type: "START_HAND" })}>
-              Dealer: Start hand
-            </button>
-          </div>
+          isDealer ? (
+            <div className="actionBar">
+              <button onClick={() => send({ type: "START_HAND" })}>Start hand</button>
+            </div>
+          ) : (
+            <div className="waitingBanner">Waiting for dealer to start the next hand...</div>
+          )
         )}
 
         {inActiveHand && (
@@ -934,12 +936,12 @@ export default function App() {
             {state.showdownChoices[youId] && (
               <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
             )}
-            <button disabled={!isDealer} onClick={() => send({ type: "NEXT_STREET" })}>
-              Dealer: End hand
-            </button>
-            <button disabled={!isDealer} onClick={() => send({ type: "END_SESSION" })}>
-              Dealer: End session
-            </button>
+            {isDealer && (
+              <>
+                <button onClick={() => send({ type: "NEXT_STREET" })}>End hand</button>
+                <button className="secondary" onClick={() => send({ type: "END_SESSION" })}>End session</button>
+              </>
+            )}
           </div>
         )}
       </div>
