@@ -216,6 +216,33 @@ input[type="range"] { padding: 0; height: 28px; }
   50% { box-shadow: 0 0 22px rgba(255,215,0,0.7), 0 0 8px rgba(255,215,0,0.4); }
 }
 
+/* Winner seat highlight */
+.seat.winner {
+  box-shadow: 0 0 0 2px #ffd700, 0 0 18px 6px rgba(255,215,0,0.45);
+  animation: winnerPulse 0.7s ease-in-out 4;
+}
+@keyframes winnerPulse {
+  0%, 100% { box-shadow: 0 0 0 2px #ffd700, 0 0 12px 4px rgba(255,215,0,0.35); }
+  50% { box-shadow: 0 0 0 3px #ffd700, 0 0 28px 10px rgba(255,215,0,0.65); }
+}
+
+/* Fold ghost card-backs */
+.foldGhost {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  pointer-events: none;
+  z-index: 10;
+}
+.foldCard {
+  width: 26px !important;
+  height: 36px !important;
+  border-radius: 5px;
+  opacity: 0.65;
+}
+
 /* Position badges */
 .posBadge {
   display: inline-block;

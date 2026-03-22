@@ -205,6 +205,9 @@ export default function App() {
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
   const [dealAnimations, setDealAnimations] = useState<DealAnim[]>([]);
   const [streetFlash, setStreetFlash] = useState<string | null>(null);
+  const [potPulse, setPotPulse] = useState(0);
+  const [winnerPlayerIds, setWinnerPlayerIds] = useState<Set<string>>(new Set());
+  const [foldingPlayers, setFoldingPlayers] = useState<Set<string>>(new Set());
   const prevStateRef = useRef<TableState | null>(null);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
@@ -252,7 +255,10 @@ export default function App() {
           }]);
         }
       });
-      if (hadBetIncrease && soundEnabled) playChipBet();
+      if (hadBetIncrease) {
+        if (soundEnabled) playChipBet();
+        setPotPulse(n => n + 1);
+      }
     }
 
     // 3. Street change → flash label + sound
@@ -282,6 +288,31 @@ export default function App() {
     if (currTurnId === youId && prevTurnId !== youId &&
         state.street !== "DONE" && state.street !== "SHOWDOWN") {
       if (soundEnabled) playYourTurn();
+    }
+
+    // 7. Hand ends → highlight winner seats for 3s
+    if (state.street === "DONE" && prev.street !== "DONE") {
+      const winners = new Set(state.pots.flatMap(p => p.winnerIds ?? []));
+      if (winners.size > 0) {
+        setWinnerPlayerIds(winners);
+        setTimeout(() => setWinnerPlayerIds(new Set()), 3000);
+      }
+    }
+
+    // 8. Player folds → show card-back ghost for 1.2s
+    if (state.handNumber === prev.handNumber) {
+      for (const p of state.players) {
+        const prevP = prev.players.find(pp => pp.id === p.id);
+        if (prevP && !prevP.folded && p.folded) {
+          setFoldingPlayers(fp => new Set([...fp, p.id]));
+          const foldId = p.id;
+          setTimeout(() => setFoldingPlayers(fp => {
+            const next = new Set(fp);
+            next.delete(foldId);
+            return next;
+          }), 1200);
+        }
+      }
     }
   }, [state, youId, soundEnabled]);
 
@@ -498,7 +529,14 @@ export default function App() {
       <div className="tableRing">
         {/* Center: board area */}
         <div className="ringCenter">
-          <div className="potDisplay">Pot: <AnimatedNumber value={state.pot} /></div>
+          <motion.div
+            className="potDisplay"
+            key={potPulse}
+            animate={potPulse > 0 ? { scale: [1, 1.18, 1], color: ["#ffd700", "#fff8a0", "#ffd700"] } : {}}
+            transition={{ duration: 0.45, ease: "easeOut" }}
+          >
+            Pot: <AnimatedNumber value={state.pot} />
+          </motion.div>
 
           {(() => {
             const hasAllIn = state.players.some(p => p.inHand && !p.folded && p.stack === 0);
@@ -635,6 +673,8 @@ export default function App() {
           const isFolded = p.inHand && p.folded;
           const isSittingOut = !p.inHand || p.sittingOut;
           const isOtherSeat = p.id !== youId;
+          const isWinner = winnerPlayerIds.has(p.id);
+          const isFolding = foldingPlayers.has(p.id);
           const showBankOnSeat = isBank;
           const showDealerOnSeat = isOtherSeat && isDealer && !p.isDealer;
           const showGear = showBankOnSeat || showDealerOnSeat;
@@ -647,7 +687,8 @@ export default function App() {
                 (p.isDealer ? " dealer" : "") +
                 (isTurn ? " turn" : "") +
                 (isFolded ? " folded" : "") +
-                (isSittingOut && state.street !== "DONE" ? " sitting-out" : "")
+                (isSittingOut && state.street !== "DONE" ? " sitting-out" : "") +
+                (isWinner ? " winner" : "")
               }
               style={seatStyle(i, seatCount)}
             >
@@ -731,6 +772,20 @@ export default function App() {
                   )}
                 </div>
               )}
+              {/* Fold card-back ghost — two card backs that float off the seat when player folds */}
+              <AnimatePresence>
+                {isFolding && (
+                  <motion.div
+                    className="foldGhost"
+                    initial={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -18, scale: 0.75 }}
+                    transition={{ duration: 0.6, ease: "easeIn" }}
+                  >
+                    <span className="playingCard card-back foldCard" />
+                    <span className="playingCard card-back foldCard" style={{ marginLeft: 4 }} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}
