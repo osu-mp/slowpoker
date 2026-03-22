@@ -936,12 +936,20 @@ export default function App() {
             {state.showdownChoices[youId] && (
               <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
             )}
-            {isDealer && (
-              <>
-                <button onClick={() => send({ type: "NEXT_STREET" })}>End hand</button>
-                <button className="secondary" onClick={() => send({ type: "END_SESSION" })}>End session</button>
-              </>
-            )}
+            {isDealer && (() => {
+              const pendingChoices = state.players.filter(p => p.inHand && !p.folded && !state.showdownChoices[p.id]).length;
+              return (
+                <>
+                  <button onClick={() => {
+                    if (pendingChoices > 0 && !confirm(`${pendingChoices} player${pendingChoices > 1 ? "s have" : " has"} not chosen yet. End hand anyway?`)) return;
+                    send({ type: "NEXT_STREET" });
+                  }}>End hand</button>
+                  <button className="secondary" onClick={() => {
+                    if (confirm("End the session? All players will see the recap.")) send({ type: "END_SESSION" });
+                  }}>End session</button>
+                </>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -1103,7 +1111,7 @@ export default function App() {
                         {h.showdownChoices.length > 0 && (
                           <div style={{ marginTop: 6 }}>
                             {h.showdownChoices.map((s, i) => {
-                              if (s.choice === "SHOW_0") return <div key={i} className="small">{s.playerName}: Mucks</div>;
+                              if (s.choice === "SHOW_0") return <div key={i} className="small">{s.playerName}: Hides</div>;
                               const cardStr = s.cards?.map(c => formatCard(c)).join(" ") ?? "";
                               const handStr = s.handName ? ` — ${s.handName}` : "";
                               return <div key={i} className="small">{s.playerName}: {cardStr}{handStr}</div>;
@@ -1275,7 +1283,7 @@ function BettingPanel(props: {
 
 function renderChoice(c: ShowChoice | undefined) {
   if (!c) return "—";
-  if (c.kind === "SHOW_0") return "Muck (show 0)";
+  if (c.kind === "SHOW_0") return "Hide";
   if (c.kind === "SHOW_2") return "Show 2";
   return `Show 1 (card ${c.cardIndex === 0 ? "left" : "right"})`;
 }
@@ -1319,7 +1327,7 @@ function UserSettingsPopover({ yourEmoji, chipRequest, onRequest, autoShowPref, 
           {(["ask", "muck", "show"] as const).map(opt => (
             <label key={opt} className="hstack" style={{ gap: 4, cursor: "pointer" }}>
               <input type="radio" name="autoShow" value={opt} checked={autoShowPref === opt} onChange={() => onAutoShowChange(opt)} />
-              <span className="small">{opt === "ask" ? "Ask" : opt === "muck" ? "Auto-muck" : "Auto-show"}</span>
+              <span className="small">{opt === "ask" ? "Ask" : opt === "muck" ? "Auto-hide" : "Auto-show"}</span>
             </label>
           ))}
         </div>
@@ -1334,7 +1342,7 @@ function ShowdownPanel({ onPick, holeCards }: { onPick: (c: ShowChoice) => void;
   return (
     <div className="hstack" style={{ gap: 8 }}>
       <span className="small">Your showdown:</span>
-      <button onClick={() => onPick({ kind: "SHOW_0" })}>Muck</button>
+      <button onClick={() => onPick({ kind: "SHOW_0" })}>Hide</button>
       <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 0 })}>Show {c0}</button>
       <button onClick={() => onPick({ kind: "SHOW_1", cardIndex: 1 })}>Show {c1}</button>
       <button onClick={() => onPick({ kind: "SHOW_2" })}>Show Both</button>
