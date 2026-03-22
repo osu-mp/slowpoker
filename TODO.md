@@ -16,20 +16,14 @@
   chip clink, check tap, fold whoosh, your-turn chime, win arpeggio, street sweep. Verify mute
   toggle persists across page refreshes.
 
-- **Host onboarding**: First-time hosts are confused by the dealer/bank split (two distinct roles that
-  real poker doesn't have). The bank assignment is buried in a seat gear menu. Add a short setup guide
-  or tooltip explaining: dealer controls hand flow, bank controls stacks/blinds. Surface "Make Bank" more
-  prominently on first join when no bank is assigned.
+- **Host onboarding** ✓ DONE: When the dealer joins and no bank is assigned, a gold notice appears
+  explaining the dealer/bank split and directing them to the gear menu to assign a bank.
 
-- **NEXT_STREET guard**: The "Deal flop / turn / river" button is visible even while betting is still in
-  progress (roundComplete === false). Add a confirmation prompt ("2 players still to act — deal anyway?")
-  to prevent accidental premature street advances.
+- **NEXT_STREET guard** ✓ DONE: "End hand" confirms if players haven't chosen; "End session" always confirms.
 
-- **"Muck" label**: The ShowdownPanel uses poker jargon "Muck" — casual players may not know this means
-  "fold face-down". Consider renaming to "Hide" or "Fold face-down" for clarity.
+- **"Muck" label** ✓ DONE: Renamed to "Hide" in ShowdownPanel, hand history, and auto-show preference.
 
-- **Waiting banner player name**: The "Waiting for [name]..." banner could make the player name larger/bolder
-  — it's the most important info when it's not your turn.
+- **Waiting banner player name** ✓ DONE: Player name is now 17px bold gold in the waiting banner.
 
 - **End-of-session summary** ✓ DONE: Recap modal now shows per-player table (hands, pots won, chips won,
   final stack), biggest pot of the session, and busted-out players. `STACKS_SNAPSHOT` event logged at
@@ -76,15 +70,14 @@
 - **Multiple concurrent tables**: Architecture already supports multiple tableIds. Just needs a
   lobby/table-picker UI (list of active tables, create new, join by code).
 
-- **Mobile layout polish**: Larger action buttons and bigger bet-slider thumb on touch screens.
-  The ellipse seat layout needs `min-height: 520px`. On small phones the board and seats can overlap.
-  CSS: `input[type=range]::-webkit-slider-thumb { width: 28px; height: 28px }`.
+- **Mobile layout polish** ✓ DONE: Action buttons `min-height: 44px`, primary buttons 52px/18px,
+  range slider height 36px with 28px thumb on touch screens.
 
-- **Reconnect border pulse**: While `connStatus === "reconnecting"`, add a pulsing yellow border
-  around the viewport (not just the banner) to make it more obvious something is wrong.
+- **Reconnect border pulse** ✓ DONE: `body.reconnecting` class triggers a pulsing gold viewport border
+  via CSS `::after` pseudo-element while WebSocket is reconnecting.
 
-- **Action log default open**: Currently collapsed on first load — new users never see it. Consider
-  defaulting to open, or showing the last 1-2 actions inline above the action bar.
+- **Action log inline** ✓ DONE: Most recent action log entry shown as a small dim line above the
+  action bar — visible without expanding the collapsible log.
 
 - **Emoji expansion**: Only 10 hardcoded emojis. For groups of 5+ regulars who always play together,
   a larger picker (or free-text emoji entry) would let everyone have a unique identity.

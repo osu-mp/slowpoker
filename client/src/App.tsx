@@ -328,6 +328,12 @@ export default function App() {
     }
   }, [state, youId, soundEnabled]);
 
+  // Reconnect border: toggle body class so CSS viewport pulse applies
+  useEffect(() => {
+    document.body.classList.toggle("reconnecting", connStatus === "reconnecting");
+    return () => document.body.classList.remove("reconnecting");
+  }, [connStatus]);
+
   // Tab title: "YOUR TURN" when it's your turn
   useEffect(() => {
     if (!state || !youId) {
@@ -516,6 +522,13 @@ export default function App() {
       )}
       {connStatus === "disconnected" && conn && (
         <div className="reconnectBanner disconnected">Connection lost. Please refresh the page.</div>
+      )}
+
+      {/* ── Host onboarding: no bank assigned ── */}
+      {isDealer && !state.bankPlayerId && state.street === "DONE" && (
+        <div className="notice" style={{ borderColor: "rgba(255,215,0,0.4)", background: "rgba(255,215,0,0.08)" }}>
+          <b>Setup:</b> No bank assigned yet. Open the ⚙ gear on any seat → <b>Make bank</b> to assign someone to control stacks &amp; blinds. The dealer starts hands; the bank sets chips.
+        </div>
       )}
 
       {/* ── Bank chip-request alert banner ── */}
@@ -887,6 +900,11 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Last action inline hint ── */}
+      {state.actionLog.length > 0 && (
+        <div className="lastAction">{state.actionLog[0]}</div>
+      )}
+
       {/* ── Sticky action bar ── */}
       <div className="actions">
         {state.street === "DONE" && (
@@ -915,7 +933,7 @@ export default function App() {
             </div>
           ) : (
             <div className="waitingBanner">
-              Waiting for <b>{currentTurnPlayer?.name ?? "..."}</b>...
+              Waiting for <span className="waitingName">{currentTurnPlayer?.name ?? "..."}</span>
             </div>
           )
         )}
