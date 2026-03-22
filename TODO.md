@@ -54,14 +54,14 @@
 
 ## P2 — Visual improvements (medium impact — on deck)
 
-- **Street transition overlay**: At FLOP/TURN/RIVER advance, show a brief full-width centered "Flop" / "Turn"
-  / "River" text overlay with a sweep animation (more prominent than the current small streetFlash label).
+- **Street transition overlay** ✓ DONE: Full-screen 80px gold text sweeps in from left at FLOP/TURN/RIVER,
+  holds 1.8s, sweeps out to right. Replaced the small in-board label.
 
-- **Stack delta flash**: When a player's stack changes (win or loss), flash the stack number green (+) or
-  red (−) for ~1.5 seconds. Use framer-motion key change on the stack value.
+- **Stack delta flash** ✓ DONE: When any player's stack changes, a green (+N) or red (−N) badge floats up
+  and fades beside their stack number for 1.5 seconds.
 
-- **Sitting out indicator**: Beyond 40% opacity, add a small "💤" badge or strikethrough on sitting-out
-  players so they are more immediately scannable at a glance mid-hand.
+- **Sitting out indicator** ✓ DONE: 💤 badge appears next to the player name on sitting-out seats during
+  an active hand, beyond the existing 40% opacity dim.
 
 ## P3 — Features / nice-to-have
 

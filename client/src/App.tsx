@@ -208,6 +208,7 @@ export default function App() {
   const [potPulse, setPotPulse] = useState(0);
   const [winnerPlayerIds, setWinnerPlayerIds] = useState<Set<string>>(new Set());
   const [foldingPlayers, setFoldingPlayers] = useState<Set<string>>(new Set());
+  const [stackDeltas, setStackDeltas] = useState<Record<string, number>>({});
   const prevStateRef = useRef<TableState | null>(null);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
@@ -264,7 +265,7 @@ export default function App() {
     // 3. Street change → flash label + sound
     if (state.street !== prev.street && ["FLOP", "TURN", "RIVER"].includes(state.street)) {
       setStreetFlash(streetLabel(state.street));
-      setTimeout(() => setStreetFlash(null), 1500);
+      setTimeout(() => setStreetFlash(null), 1800);
       if (soundEnabled) playStreetTransition();
     }
 
@@ -299,7 +300,18 @@ export default function App() {
       }
     }
 
-    // 8. Player folds → show card-back ghost for 1.2s
+    // 8. Stack changes → show delta badge for 1.5s
+    for (const p of state.players) {
+      const prevP = prev.players.find(pp => pp.id === p.id);
+      if (prevP && p.stack !== prevP.stack) {
+        const delta = p.stack - prevP.stack;
+        const pid = p.id;
+        setStackDeltas(d => ({ ...d, [pid]: delta }));
+        setTimeout(() => setStackDeltas(d => { const { [pid]: _, ...rest } = d; return rest; }), 1500);
+      }
+    }
+
+    // 9. Player folds → show card-back ghost for 1.2s
     if (state.handNumber === prev.handNumber) {
       for (const p of state.players) {
         const prevP = prev.players.find(pp => pp.id === p.id);
@@ -563,10 +575,10 @@ export default function App() {
               <motion.div
                 className="streetFlash"
                 key={streetFlash}
-                initial={{ opacity: 0, scale: 1.5, y: -10 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                transition={{ type: "spring", stiffness: 300, damping: 18 }}
+                initial={{ opacity: 0, x: -60, scale: 0.85 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 60, scale: 0.85 }}
+                transition={{ type: "spring", stiffness: 320, damping: 24 }}
               >
                 {streetFlash}
               </motion.div>
@@ -708,7 +720,9 @@ export default function App() {
               )}
               <div>
                 <div>
-                  <b>{p.emoji ?? playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b> {p.connected ? "" : <span className="small">(disconnected)</span>}
+                  <b>{p.emoji ?? playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b>
+                  {isSittingOut && state.street !== "DONE" && <span style={{ marginLeft: 4, fontSize: 12, opacity: 0.7 }}>💤</span>}
+                  {p.connected ? "" : <span className="small"> (disconnected)</span>}
                   {/* Position badges — compare by player ID */}
                   {state.positions && state.street !== "DONE" && (
                     <>
@@ -721,7 +735,21 @@ export default function App() {
                   {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8, fontSize: 10 }}>Bank</span> : null}
                 </div>
                 <div className="small">
-                  Stack: <b>{p.stack}</b> • Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
+                  Stack: <b>{p.stack}</b>
+                  <AnimatePresence>
+                    {stackDeltas[p.id] != null && (
+                      <motion.span
+                        key={p.stack}
+                        className={`stackDelta ${stackDeltas[p.id] >= 0 ? "positive" : "negative"}`}
+                        initial={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.8 }}
+                      >
+                        {stackDeltas[p.id] >= 0 ? `+${stackDeltas[p.id]}` : stackDeltas[p.id]}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                  {" "}• Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
                 </div>
               </div>
 

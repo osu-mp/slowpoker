@@ -226,6 +226,16 @@ input[type="range"] { padding: 0; height: 28px; }
   50% { box-shadow: 0 0 0 3px #ffd700, 0 0 28px 10px rgba(255,215,0,0.65); }
 }
 
+/* Stack delta badge */
+.stackDelta {
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 4px;
+  display: inline-block;
+}
+.stackDelta.positive { color: #55cc88; }
+.stackDelta.negative { color: #ff6666; }
+
 /* Fold ghost card-backs */
 .foldGhost {
   position: absolute;
@@ -461,11 +471,19 @@ input[type="range"] { padding: 0; height: 28px; }
   transform: translate(-50%, -50%);
 }
 .streetFlash {
-  font-size: 22px;
-  font-weight: 700;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 80px;
+  font-weight: 800;
   color: #ffd700;
-  text-shadow: 0 0 12px rgba(255,215,0,0.5);
-  margin-bottom: 6px;
+  text-shadow: 0 0 40px rgba(255,215,0,0.7), 0 4px 24px rgba(0,0,0,0.9);
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  pointer-events: none;
+  z-index: 150;
+  white-space: nowrap;
 }
 
 /* ── Popover ── */
