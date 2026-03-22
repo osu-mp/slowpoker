@@ -3,7 +3,10 @@ import cors from "cors";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import type WebSocket from "ws";
 import { Table } from "./table.js";
 import type { ClientToServer, ServerToClient, TableState } from "./types.js";
