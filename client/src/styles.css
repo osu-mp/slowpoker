@@ -279,6 +279,36 @@ input[type="range"] { padding: 0; height: 28px; }
   text-overflow: ellipsis;
 }
 
+/* ── Welcome back toast ── */
+.welcomeBackToast {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 50, 35, 0.95);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  border-radius: 12px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  z-index: 200;
+  white-space: nowrap;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+.toastClose {
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.5);
+  padding: 2px 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  min-height: unset;
+}
+.toastClose:hover { color: white; filter: none; }
+
 /* ── Action bar ── */
 .actions {
   position: sticky;

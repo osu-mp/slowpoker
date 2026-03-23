@@ -59,16 +59,15 @@
 
 ## P3 — Features / nice-to-have
 
-- **Long-term player profiles**: `playerId` (nanoid) already persists in localStorage. On the server,
-  store a flat `data/players/{playerId}.json` with lifetime stats (hands, chips won/lost, sessions).
-  Update on SESSION_ENDED. Show "Welcome back, Alice — lifetime: +450 chips" in the WELCOME flow.
-  No database needed — ~2-3 hours of work. Note: only works if players always use the same browser/device.
+- **Long-term player profiles** ✓ DONE: `data/players/{playerId}.json` stores lifetime stats (sessions,
+  handsPlayed, chipsWon). Updated after each SESSION_ENDED via `summarize()`. WELCOME now includes
+  `profile` field. Client shows "Welcome back, Alice — Session N • X hands • +Y chips lifetime" toast.
+  Note: only works if players always use the same browser/device.
 
-- **Session history panel**: The hand-history modal shows the current session. Add a session
-  selector to browse previous sessions from `server/data/sessions/`.
+  - **Verify in live session**: end a session, rejoin — confirm welcome-back toast appears with correct stats.
 
-- **Multiple concurrent tables**: Architecture already supports multiple tableIds. Just needs a
-  lobby/table-picker UI (list of active tables, create new, join by code).
+- **Session history panel** ✓ DONE: Hand History modal now has a session selector dropdown listing
+  all past sessions. Defaults to current session; switching re-fetches hands for the selected session.
 
 - **Mobile layout polish** ✓ DONE: Action buttons `min-height: 44px`, primary buttons 52px/18px,
   range slider height 36px with 28px thumb on touch screens.
@@ -79,5 +78,5 @@
 - **Action log inline** ✓ DONE: Most recent action log entry shown as a small dim line above the
   action bar — visible without expanding the collapsible log.
 
-- **Emoji expansion**: Only 10 hardcoded emojis. For groups of 5+ regulars who always play together,
-  a larger picker (or free-text emoji entry) would let everyone have a unique identity.
+- **Emoji expansion** ✓ DONE: Expanded from 10 to 30 emojis (animals, faces, objects). Picker in
+  settings popover shows all options.

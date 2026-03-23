@@ -144,8 +144,17 @@ export type ClientToServer =
   | { type: "SET_BANK"; playerId: string }
   | { type: "END_SESSION" };
 
+export type PlayerProfile = {
+  name: string;
+  firstSeen: number;
+  lastSeen: number;
+  sessions: number;
+  handsPlayed: number;
+  chipsWon: number;
+};
+
 export type ServerToClient =
-  | { type: "WELCOME"; youId: string; state: TableState }
+  | { type: "WELCOME"; youId: string; state: TableState; profile?: PlayerProfile }
   | { type: "STATE"; state: TableState }
   | { type: "ERROR"; message: string }
   | { type: "SESSION_ENDED"; tableId: string; sessionId: string };

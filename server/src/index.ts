@@ -9,10 +9,47 @@ import { WebSocketServer } from "ws";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import type WebSocket from "ws";
 import { Table } from "./table.js";
-import type { ClientToServer, ServerToClient, TableState } from "./types.js";
+import type { ClientToServer, ServerToClient, TableState, PlayerProfile } from "./types.js";
 import { readJsonl, summarize } from "./recap.js";
 import { reconstructHands } from "./handHistory.js";
 import { registerAdminRoutes } from "./admin.js";
+
+const playersDir = path.join(process.cwd(), "data", "players");
+
+function loadProfile(playerId: string): PlayerProfile | undefined {
+  const file = path.join(playersDir, `${playerId}.json`);
+  if (!fs.existsSync(file)) return undefined;
+  try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return undefined; }
+}
+
+function saveProfile(playerId: string, profile: PlayerProfile) {
+  if (!fs.existsSync(playersDir)) fs.mkdirSync(playersDir, { recursive: true });
+  fs.writeFileSync(path.join(playersDir, `${playerId}.json`), JSON.stringify(profile, null, 2));
+}
+
+function updateProfilesFromSession(tableId: string, sessionId: string) {
+  try {
+    const logFile = path.join(sessionsDir, tableId, `${sessionId}.jsonl`);
+    if (!fs.existsSync(logFile)) return;
+    const events = readJsonl(logFile);
+    const s = summarize(events);
+    const now = Date.now();
+    for (const stat of s.playerStats) {
+      const existing = loadProfile(stat.id);
+      const updated: PlayerProfile = {
+        name: stat.name,
+        firstSeen: existing?.firstSeen ?? now,
+        lastSeen: now,
+        sessions: (existing?.sessions ?? 0) + 1,
+        handsPlayed: (existing?.handsPlayed ?? 0) + stat.handsPlayed,
+        chipsWon: (existing?.chipsWon ?? 0) + (stat.chipDelta ?? 0),
+      };
+      saveProfile(stat.id, updated);
+    }
+  } catch (e) {
+    console.error("[profiles] Failed to update profiles:", e);
+  }
+}
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
@@ -142,7 +179,8 @@ wss.on("connection", (ws) => {
 
         current = { ws, tableId: msg.tableId, playerId: player.id };
         conns.add(current);
-        send(ws, { type: "WELCOME", youId: player.id, state: redactState(table.state, player.id) });
+        const profile = loadProfile(player.id);
+        send(ws, { type: "WELCOME", youId: player.id, state: redactState(table.state, player.id), profile });
         broadcastState(msg.tableId, table);
         return;
       }
@@ -167,14 +205,18 @@ wss.on("connection", (ws) => {
         case "SIT_IN": table.setSitOut(current.playerId, false); break;
         case "REQUEST_STACK": table.requestStack(current.playerId, msg.amount); break;
         case "CLEAR_STACK_REQUEST": table.clearStackRequest(current.playerId, msg.playerId); break;
-        case "END_SESSION":
+        case "END_SESSION": {
+          const endedSessionId = table.state.sessionId;
           table.endSession(current.playerId);
           for (const c of conns) {
             if (c.tableId === current.tableId) {
-              c.ws.send(JSON.stringify({ type: "SESSION_ENDED", tableId: current.tableId, sessionId: table.state.sessionId } as ServerToClient));
+              c.ws.send(JSON.stringify({ type: "SESSION_ENDED", tableId: current.tableId, sessionId: endedSessionId } as ServerToClient));
             }
           }
+          // Update lifetime profiles in the background
+          setImmediate(() => updateProfilesFromSession(current!.tableId, endedSessionId));
           break;
+        }
       }
 
       broadcastState(current.tableId, table);

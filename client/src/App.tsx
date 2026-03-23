@@ -1,13 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
-import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary } from "./types";
+import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary, PlayerProfile } from "./types";
 import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, playStreetTransition } from "./sounds";
 
 type Conn = ReturnType<typeof connect> | null;
 
 const SUIT_GLYPHS: Record<string, string> = { h: "\u2665", d: "\u2666", c: "\u2663", s: "\u2660" };
-const PLAYER_EMOJIS = ["\uD83D\uDC36", "\uD83E\uDD8A", "\uD83D\uDC31", "\uD83D\uDC38", "\uD83E\uDD81", "\uD83D\uDC3C", "\uD83D\uDC28", "\uD83D\uDC2F", "\uD83E\uDD84", "\uD83D\uDC19"];
+const PLAYER_EMOJIS = [
+  // Animals
+  "\uD83D\uDC36", "\uD83E\uDD8A", "\uD83D\uDC31", "\uD83D\uDC38", "\uD83E\uDD81",
+  "\uD83D\uDC3C", "\uD83D\uDC28", "\uD83D\uDC2F", "\uD83E\uDD84", "\uD83D\uDC19",
+  "\uD83D\uDC3A", "\uD83E\uDD8B", "\uD83D\uDC37", "\uD83D\uDC3B", "\uD83E\uDD94",
+  "\uD83D\uDC22", "\uD83E\uDD96", "\uD83E\uDDA7", "\uD83E\uDD9C", "\uD83D\uDC27",
+  // Faces / people
+  "\uD83E\uDD20", "\uD83D\uDE08", "\uD83E\uDDD9", "\uD83E\uDD13", "\uD83D\uDC80",
+  // Objects / misc
+  "\uD83C\uDFB2", "\uD83C\uDFA9", "\uD83D\uDC8E", "\uD83D\uDD25", "\uD83D\uDE80",
+];
 function playerEmoji(index: number) { return PLAYER_EMOJIS[index % PLAYER_EMOJIS.length]; }
 function formatCard(c: string) {
   const rank = c.slice(0, -1);
@@ -188,6 +198,8 @@ export default function App() {
   const [handHistoryOpen, setHandHistoryOpen] = useState(false);
   const [handHistoryLoading, setHandHistoryLoading] = useState(false);
   const [expandedHand, setExpandedHand] = useState<number | null>(null);
+  const [availableSessions, setAvailableSessions] = useState<string[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("sp-soundEnabled") !== "false");
   const [blindsOpen, setBlindsOpen] = useState(false);
   const toggleBlinds = useCallback(() => setBlindsOpen(o => !o), []);
@@ -200,6 +212,7 @@ export default function App() {
   useEffect(() => { autoShowPrefRef.current = autoShowPref; }, [autoShowPref]);
   const [chipPromptOpen, setChipPromptOpen] = useState(false);
   const [chipPromptAmount, setChipPromptAmount] = useState(200);
+  const [welcomeBack, setWelcomeBack] = useState<PlayerProfile | null>(null);
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -375,6 +388,7 @@ export default function App() {
           sessionIdRef.current = m.state.sessionId;
           const me = m.state.players.find(p => p.id === m.youId);
           if (me && me.stack === 0 && !sessionStorage.getItem(`sp-chip-prompted-${tableId}`)) setChipPromptOpen(true);
+          if (m.profile && m.profile.sessions > 0) setWelcomeBack(m.profile);
         }
         else if (m.type === "STATE") { setState(m.state); }
         else if (m.type === "ERROR") { setError(m.message); }
@@ -399,11 +413,25 @@ export default function App() {
       .finally(() => setRecapLoading(false));
   }
 
-  function fetchHandHistory() {
-    const sid = sessionIdRef.current ?? state?.sessionId;
-    if (!sid) return;
+  function fetchHandHistory(sid?: string) {
+    const sessionId = sid ?? sessionIdRef.current ?? state?.sessionId;
+    if (!sessionId) return;
     setHandHistoryLoading(true);
-    fetch(`http://localhost:3001/api/hands/${tableId}/${sid}`)
+    // Load session list if opening fresh
+    if (!sid) {
+      fetch(`http://localhost:3001/api/sessions/${tableId}`)
+        .then(r => r.json())
+        .then((ids: string[]) => {
+          setAvailableSessions(ids);
+          // Ensure current session is in list (may not be written yet for ongoing session)
+          if (sessionId && !ids.includes(sessionId)) {
+            setAvailableSessions(prev => [...prev, sessionId]);
+          }
+        })
+        .catch(() => {});
+      setSelectedSessionId(sessionId);
+    }
+    fetch(`http://localhost:3001/api/hands/${tableId}/${sessionId}`)
       .then(r => r.json())
       .then(data => { setHandHistory(data); setHandHistoryOpen(true); })
       .catch(() => setError("Failed to load hand history."))
@@ -1063,7 +1091,28 @@ export default function App() {
         <div className="recapOverlay" onClick={() => setHandHistoryOpen(false)}>
           <div className="handHistoryModal" onClick={(e) => e.stopPropagation()}>
             <div className="title">Hand History</div>
-            {handHistory.length === 0 ? (
+            {availableSessions.length > 1 && (
+              <div style={{ marginBottom: 10 }}>
+                <select
+                  value={selectedSessionId ?? ""}
+                  onChange={(e) => {
+                    const newSid = e.target.value;
+                    setSelectedSessionId(newSid);
+                    fetchHandHistory(newSid);
+                  }}
+                  style={{ width: "100%", padding: "4px 6px", background: "var(--bg-card)", color: "var(--text)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 4 }}
+                >
+                  {availableSessions.map(sid => (
+                    <option key={sid} value={sid}>
+                      {sid === (sessionIdRef.current ?? state?.sessionId) ? `${sid} (current)` : sid}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {handHistoryLoading ? (
+              <div className="small" style={{ marginTop: 12 }}>Loading...</div>
+            ) : handHistory.length === 0 ? (
               <div className="small" style={{ marginTop: 12 }}>No hands played yet.</div>
             ) : (
               <div className="handList">
@@ -1169,6 +1218,29 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ── Welcome back toast ── */}
+      <AnimatePresence>
+        {welcomeBack && (
+          <motion.div
+            className="welcomeBackToast"
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 40 }}
+            transition={{ duration: 0.35 }}
+          >
+            <span>
+              Welcome back, <b>{welcomeBack.name}</b>!
+              {" "}Session {welcomeBack.sessions + 1} •{" "}
+              {welcomeBack.handsPlayed} hands •{" "}
+              <span style={{ color: welcomeBack.chipsWon >= 0 ? "#55cc88" : "#ff6666" }}>
+                {welcomeBack.chipsWon >= 0 ? "+" : ""}{welcomeBack.chipsWon} chips lifetime
+              </span>
+            </span>
+            <button className="toastClose" onClick={() => setWelcomeBack(null)}>✕</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
