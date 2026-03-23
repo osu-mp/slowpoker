@@ -136,7 +136,7 @@ app.get("/api/hands/:tableId/:sessionId", (_req, res) => {
 
 // Admin panel (requires ADMIN_TOKEN env var)
 const adminRouter = express.Router();
-registerAdminRoutes(adminRouter, tables, conns);
+registerAdminRoutes(adminRouter, tables, conns, broadcastState);
 app.use("/admin", adminRouter);
 
 // Serve client build when present — enables single-port hosting (one tunnel, one URL)

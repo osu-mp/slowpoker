@@ -406,7 +406,7 @@ export default function App() {
     const sid = sessionIdRef.current ?? state?.sessionId;
     if (!sid) return;
     setRecapLoading(true);
-    fetch(`http://localhost:3001/api/recap/${tableId}/${sid}`)
+    fetch(`/api/recap/${tableId}/${sid}`)
       .then(r => r.json())
       .then(data => { setRecap(data); setRecapOpen(true); })
       .catch(() => setError("Failed to load session recap."))
@@ -419,7 +419,7 @@ export default function App() {
     setHandHistoryLoading(true);
     // Load session list if opening fresh
     if (!sid) {
-      fetch(`http://localhost:3001/api/sessions/${tableId}`)
+      fetch(`/api/sessions/${tableId}`)
         .then(r => r.json())
         .then((ids: string[]) => {
           setAvailableSessions(ids);
@@ -431,7 +431,7 @@ export default function App() {
         .catch(() => {});
       setSelectedSessionId(sessionId);
     }
-    fetch(`http://localhost:3001/api/hands/${tableId}/${sessionId}`)
+    fetch(`/api/hands/${tableId}/${sessionId}`)
       .then(r => r.json())
       .then(data => { setHandHistory(data); setHandHistoryOpen(true); })
       .catch(() => setError("Failed to load hand history."))

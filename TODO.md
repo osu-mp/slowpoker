@@ -2,6 +2,19 @@
 
 ## P1 — Deployment (do before next hosted game)
 
+- **API URL fix** ✓ DONE: All client `fetch()` calls now use relative `/api/...` URLs (no hardcoded
+  `localhost:3001`). Vite dev proxy added so `/api` → `localhost:3001` in development. Remote players
+  through the tunnel can now load hand history and recap.
+
+- **Admin dealer/bank reassignment** ✓ DONE: Admin panel now shows each table's player list with
+  dealer/bank/disconnected tags. Click any table row to expand; use the "Set dealer" / "Set bank"
+  dropdowns to force-reassign roles if the current holder disconnects mid-game. State is broadcast
+  live to all connected players immediately. New endpoints: `POST /admin/api/table/:id/set-dealer`
+  and `POST /admin/api/table/:id/set-bank`.
+
+  - **Verify in live session**: disconnect dealer mid-game, go to `/admin?token=...`, expand table,
+    reassign dealer to another player — confirm their client shows Start Hand button.
+
 - **Verify admin panel in live session** ✓ built: Set `ADMIN_TOKEN` env var, visit `/admin?token=...`, confirm
   table list shows, idle badge appears after inactivity, Kill button removes table. Test that idle cleanup
   fires after 30 min with no connections.

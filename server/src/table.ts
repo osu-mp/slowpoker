@@ -143,6 +143,23 @@ export class Table {
     appendEvent({ ts: Date.now(), type: "BANK_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: newBankId } });
   }
 
+  adminSetDealer(playerId: string) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    for (const pl of this.state.players) pl.isDealer = (pl.id === playerId);
+    this.state.dealerMessage = `Dealer reassigned to ${p.name} (admin).`;
+    this.pushLog(`Dealer reassigned to ${p.name} (admin).`);
+    appendEvent({ ts: Date.now(), type: "DEALER_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
+  adminSetBank(playerId: string) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
+    this.state.bankPlayerId = playerId;
+    this.pushLog(`Bank reassigned to ${p.name} (admin).`);
+    appendEvent({ ts: Date.now(), type: "BANK_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
   setStack(bankId: string, targetPlayerId: string, stack: number) {
     this.requireBank(bankId);
     const p = this.playerById(targetPlayerId);
