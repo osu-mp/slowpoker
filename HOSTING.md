@@ -130,6 +130,61 @@ The server auto-serves the client build, so no separate static host is needed.
 
 ---
 
+## Setting the Admin Token
+
+The admin panel (`/admin?token=...`) requires an `ADMIN_TOKEN` environment variable.
+On Windows, environment variables must be set **before** the command — not appended after it.
+
+### Development (npm run dev)
+
+Open PowerShell and run:
+
+```powershell
+$env:ADMIN_TOKEN="blah"; npm run dev
+```
+
+Or use two commands:
+
+```powershell
+$env:ADMIN_TOKEN = "blah"
+npm run dev
+```
+
+The semicolon chains them in the same shell session so the variable is visible to the process.
+
+> `npm run dev ADMIN_TOKEN=blah` is **Linux/macOS syntax** and will not work on Windows.
+
+### Production (npm start)
+
+```powershell
+$env:ADMIN_TOKEN = "your-secret-token"
+npm start
+```
+
+Or set it permanently in the current session and then start as needed.
+
+### Using the admin panel
+
+Once the server is running with `ADMIN_TOKEN` set, visit:
+
+```
+http://localhost:3001/admin?token=your-secret-token
+```
+
+Or through the tunnel URL:
+
+```
+https://your-tunnel-url/admin?token=your-secret-token
+```
+
+**Features:**
+- Click any table row to expand player details
+- **Set dealer / Set bank** dropdowns let you reassign roles if a player disconnects
+- **Kill** removes an idle table from memory
+- Page auto-refreshes every 10 seconds
+
+---
+
 ## Quick Reference
 
 | Method | Cost | Stable URL | Setup | Public |
