@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import type { TableState, PlayerState, Street, ShowChoice, TableSettings, PlayerAction, HandPositions, SidePot } from "./types.js";
+import type { TableState, PlayerState, Street, ShowChoice, TableSettings, PlayerAction, HandPositions, SidePot, GameConfigUpdate } from "./types.js";
 import { appendEvent } from "./logger.js";
 import { makeDeck, shuffle } from "./cards.js";
 import { evaluateBest, findWinners } from "./hand.js";
@@ -32,7 +32,15 @@ export class Table {
 
   constructor(public tableId: string) {
     const sessionId = nanoid(10);
-    const settings: TableSettings = { smallBlind: 1, bigBlind: 2, straddleEnabled: false };
+    const now = Date.now();
+    const settings: TableSettings = {
+      smallBlind: 1, bigBlind: 2, straddleEnabled: false,
+      blindSchedule: [], blindTrigger: "manual",
+      blindTriggerMinutes: 20, blindTriggerBusts: 1,
+      blindLevelIndex: -1, blindLevelStartedAt: now, blindPlayersAtStart: 0,
+      rebuysEnabled: false, rebuysOpenUntil: 0,
+      homeRules: { allowMidHandReveal: false },
+    };
 
     this.state = {
       tableId,
@@ -79,11 +87,12 @@ export class Table {
     if (playerId !== this.state.bankPlayerId) throw new Error("Only the Bank can do that.");
   }
 
-  addPlayer(name: string, emoji?: string): PlayerState {
+  addPlayer(name: string, emoji?: string, watchOnly = false): PlayerState {
     const id = nanoid(8);
-    const isDealer = this.state.players.length === 0;
+    const isFirst = this.state.players.length === 0;
+    const isDealer = isFirst;
     const p: PlayerState = {
-      id, name, emoji, isDealer, connected: true, sittingOut: false,
+      id, name, emoji, isDealer, connected: true, sittingOut: watchOnly,
       stack: 0,
       inHand: false,
       folded: false,
@@ -92,6 +101,7 @@ export class Table {
     };
     this.state.players.push(p);
 
+    if (isFirst) this.state.adminPlayerId = id;
     if (!this.state.bankPlayerId) this.state.bankPlayerId = id;
 
     appendEvent({ ts: Date.now(), type: "PLAYER_JOINED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { id, name, isDealer, isBank: id === this.state.bankPlayerId } });
@@ -123,6 +133,103 @@ export class Table {
     if (!p) return;
     p.connected = false;
     appendEvent({ ts: Date.now(), type: "PLAYER_DISCONNECTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
+  bootPlayer(adminId: string, targetId: string) {
+    if (adminId !== this.state.adminPlayerId) throw new Error("Only the admin can remove players.");
+    if (targetId === adminId) throw new Error("Admin cannot remove themselves.");
+    const idx = this.state.players.findIndex(p => p.id === targetId);
+    if (idx === -1) throw new Error("Player not found.");
+    const p = this.state.players[idx];
+    if (this.state.street !== "DONE" && p.inHand && !p.folded) {
+      throw new Error("Cannot remove a player who is currently in a hand. Wait for the hand to end.");
+    }
+    this.state.players.splice(idx, 1);
+    this.pushLog(`${p.name} was removed by admin.`);
+    appendEvent({ ts: Date.now(), type: "PLAYER_BOOTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: targetId } });
+  }
+
+  setConfig(adminId: string, config: GameConfigUpdate) {
+    if (adminId !== this.state.adminPlayerId) throw new Error("Only the admin can change game config.");
+    const s = this.state.settings;
+    if (config.straddleEnabled !== undefined) s.straddleEnabled = config.straddleEnabled;
+    if (config.homeRules !== undefined) s.homeRules = config.homeRules;
+    if (config.blindTrigger !== undefined) s.blindTrigger = config.blindTrigger;
+    if (config.blindTriggerMinutes !== undefined) s.blindTriggerMinutes = Math.max(1, config.blindTriggerMinutes);
+    if (config.blindTriggerBusts !== undefined) s.blindTriggerBusts = Math.max(1, config.blindTriggerBusts);
+    if (config.blindSchedule !== undefined) {
+      s.blindSchedule = config.blindSchedule;
+      if (config.blindSchedule.length > 0) {
+        s.blindLevelIndex = 0;
+        s.smallBlind = config.blindSchedule[0].smallBlind;
+        s.bigBlind = config.blindSchedule[0].bigBlind;
+        this.state.lastRaiseSize = s.bigBlind;
+        s.blindLevelStartedAt = Date.now();
+        s.blindPlayersAtStart = this.state.players.filter(p => p.stack > 0).length;
+        this.pushLog(`Blind schedule set. Starting at ${s.smallBlind}/${s.bigBlind}.`);
+      } else {
+        s.blindLevelIndex = -1;
+        this.pushLog(`Blind schedule cleared. Using static ${s.smallBlind}/${s.bigBlind}.`);
+      }
+    }
+    appendEvent({ ts: Date.now(), type: "CONFIG_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: config });
+  }
+
+  setRebuys(adminId: string, enabled: boolean, minutes: number) {
+    if (adminId !== this.state.adminPlayerId) throw new Error("Only the admin can manage rebuys.");
+    this.state.settings.rebuysEnabled = enabled;
+    if (enabled && minutes > 0) {
+      this.state.settings.rebuysOpenUntil = Date.now() + minutes * 60_000;
+      this.pushLog(`Rebuys open for ${minutes} minute${minutes === 1 ? "" : "s"}.`);
+    } else if (enabled && minutes === 0) {
+      this.state.settings.rebuysOpenUntil = Number.MAX_SAFE_INTEGER;
+      this.pushLog("Rebuys open indefinitely.");
+    } else {
+      this.state.settings.rebuysOpenUntil = 0;
+      this.pushLog("Rebuys closed.");
+    }
+    appendEvent({ ts: Date.now(), type: "REBUYS_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: { enabled, minutes } });
+  }
+
+  advanceBlinds(adminId: string) {
+    if (adminId !== this.state.adminPlayerId) throw new Error("Only the admin can advance blinds.");
+    this.doAdvanceBlinds();
+  }
+
+  private doAdvanceBlinds() {
+    const s = this.state.settings;
+    if (s.blindSchedule.length === 0) return;
+    const nextIdx = (s.blindLevelIndex < 0 ? 0 : s.blindLevelIndex) + (s.blindLevelIndex < 0 ? 0 : 1);
+    if (nextIdx >= s.blindSchedule.length) {
+      this.pushLog("Already at the final blind level.");
+      return;
+    }
+    s.blindLevelIndex = nextIdx;
+    const level = s.blindSchedule[nextIdx];
+    s.smallBlind = level.smallBlind;
+    s.bigBlind = level.bigBlind;
+    this.state.lastRaiseSize = s.bigBlind;
+    s.blindLevelStartedAt = Date.now();
+    s.blindPlayersAtStart = this.state.players.filter(p => p.stack > 0).length;
+    this.pushLog(`Blinds advanced to level ${nextIdx + 1}: ${s.smallBlind}/${s.bigBlind}.`);
+    appendEvent({ ts: Date.now(), type: "BLINDS_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { level: nextIdx, smallBlind: s.smallBlind, bigBlind: s.bigBlind } });
+  }
+
+  private checkAutoAdvanceBlinds() {
+    const s = this.state.settings;
+    if (s.blindSchedule.length === 0 || s.blindLevelIndex < 0) return;
+    if (s.blindTrigger === "manual") return;
+    const nextIdx = s.blindLevelIndex + 1;
+    if (nextIdx >= s.blindSchedule.length) return;
+
+    let shouldAdvance = false;
+    if (s.blindTrigger === "time") {
+      shouldAdvance = Date.now() - s.blindLevelStartedAt >= s.blindTriggerMinutes * 60_000;
+    } else if (s.blindTrigger === "bust") {
+      const playersWithChips = this.state.players.filter(p => p.stack > 0).length;
+      shouldAdvance = (s.blindPlayersAtStart - playersWithChips) >= s.blindTriggerBusts;
+    }
+    if (shouldAdvance) this.doAdvanceBlinds();
   }
 
   setDealer(playerId: string) {
@@ -178,7 +285,7 @@ export class Table {
       throw new Error("Invalid blinds.");
     }
     if (smallBlind >= bigBlind) throw new Error("Small blind must be < big blind.");
-    this.state.settings = { smallBlind: Math.floor(smallBlind), bigBlind: Math.floor(bigBlind), straddleEnabled: !!straddleEnabled };
+    this.state.settings = { ...this.state.settings, smallBlind: Math.floor(smallBlind), bigBlind: Math.floor(bigBlind), straddleEnabled: !!straddleEnabled, blindLevelIndex: -1 };
     this.state.lastRaiseSize = this.state.settings.bigBlind;
     this.pushLog(`Blinds set to ${this.state.settings.smallBlind}/${this.state.settings.bigBlind}${this.state.settings.straddleEnabled ? " with straddle" : ""}.`);
     appendEvent({ ts: Date.now(), type: "BLINDS_SET", tableId: this.tableId, sessionId: this.state.sessionId, payload: this.state.settings });
@@ -438,6 +545,7 @@ export class Table {
 
   startHand(dealerId: string) {
     this.requireDealer(dealerId);
+    this.checkAutoAdvanceBlinds();
     const n = this.state.players.length;
     if (n < 2) throw new Error("Need at least 2 players.");
     const activePlayers = this.state.players.filter(p => p.connected && !p.sittingOut && p.stack > 0);
@@ -770,6 +878,8 @@ export class Table {
     this.pushLog("--- Hand ended ---");
     appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
     appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: "SHOWDOWN", to: "DONE", handNumber: this.state.handNumber, board: this.state.board } });
+    // Check bust-triggered blind advance after stacks have settled
+    if (this.state.settings.blindTrigger === "bust") this.checkAutoAdvanceBlinds();
   }
 
   private allShowdownChoicesMade(): boolean {

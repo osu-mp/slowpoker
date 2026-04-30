@@ -29,10 +29,31 @@ export type PlayerState = {
   bestHand?: string;
 };
 
+export type BlindLevel = { smallBlind: number; bigBlind: number };
+
 export type TableSettings = {
   smallBlind: number;
   bigBlind: number;
   straddleEnabled: boolean;
+  blindSchedule: BlindLevel[];
+  blindTrigger: "manual" | "time" | "bust";
+  blindTriggerMinutes: number;
+  blindTriggerBusts: number;
+  blindLevelIndex: number;
+  blindLevelStartedAt: number;
+  blindPlayersAtStart: number;
+  rebuysEnabled: boolean;
+  rebuysOpenUntil: number;
+  homeRules: { allowMidHandReveal: boolean };
+};
+
+export type GameConfigUpdate = {
+  blindSchedule?: BlindLevel[];
+  blindTrigger?: "manual" | "time" | "bust";
+  blindTriggerMinutes?: number;
+  blindTriggerBusts?: number;
+  straddleEnabled?: boolean;
+  homeRules?: { allowMidHandReveal: boolean };
 };
 
 export type HandPositions = {
@@ -46,7 +67,7 @@ export type TableState = {
   tableId: string;
   sessionId: string;
   createdAt: number;
-
+  adminPlayerId?: string;
   bankPlayerId?: string;
 
   settings: TableSettings;
@@ -127,7 +148,11 @@ export type HandSummary = {
 };
 
 export type ClientToServer =
-  | { type: "HELLO"; tableId: string; name: string; playerId?: string; emoji?: string }
+  | { type: "HELLO"; tableId: string; name: string; playerId?: string; emoji?: string; watchOnly?: boolean }
+  | { type: "BOOT_PLAYER"; playerId: string }
+  | { type: "SET_CONFIG"; config: GameConfigUpdate }
+  | { type: "SET_REBUYS"; enabled: boolean; minutes: number }
+  | { type: "ADVANCE_BLINDS" }
   | { type: "SET_PROFILE"; emoji: string }
   | { type: "SET_DEALER"; playerId: string }
   | { type: "SET_STACK"; playerId: string; stack: number }

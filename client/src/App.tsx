@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
-import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary, PlayerProfile } from "./types";
+import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary, PlayerProfile, TableSettings, GameConfigUpdate, BlindLevel } from "./types";
 import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, playStreetTransition } from "./sounds";
 
 type Conn = ReturnType<typeof connect> | null;
@@ -37,13 +37,13 @@ function streetLabel(s: Street) {
   }
 }
 
-function CardPill({ c }: { c: string }) {
+function CardPill({ c, size = "" }: { c: string; size?: "md" | "lg" | "" }) {
   const rank = c.slice(0, -1);
   const suitChar = c.slice(-1);
   const glyph = SUIT_GLYPHS[suitChar] ?? suitChar;
   const isRed = suitChar === "h" || suitChar === "d";
   return (
-    <span className={`playingCard ${isRed ? "red" : "white"}`}>
+    <span className={`playingCard ${isRed ? "red" : "white"}${size ? " " + size : ""}`}>
       <span className="rank">{rank}</span>
       <span className="suit">{glyph}</span>
     </span>
@@ -81,10 +81,11 @@ function Popover({ trigger, children, open, onToggle }: {
   );
 }
 
-function SeatMenu({ player, isBank, isDealer, isSelf, pendingRequest, onSetStack, onMakeDealer, onMakeBank, onApproveRequest, onDenyRequest }: {
+function SeatMenu({ player, isBank, isDealer, isAdmin, isSelf, pendingRequest, onSetStack, onMakeDealer, onMakeBank, onApproveRequest, onDenyRequest, onBoot }: {
   player: PlayerState;
   isBank: boolean;
   isDealer: boolean;
+  isAdmin: boolean;
   isSelf: boolean;
   pendingRequest?: number;
   onSetStack: (stack: number) => void;
@@ -92,12 +93,13 @@ function SeatMenu({ player, isBank, isDealer, isSelf, pendingRequest, onSetStack
   onMakeBank: () => void;
   onApproveRequest: () => void;
   onDenyRequest: () => void;
+  onBoot: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [stackVal, setStackVal] = useState(player.stack);
   const toggle = useCallback(() => setOpen(o => !o), []);
 
-  const hasActions = isBank || isDealer;
+  const hasActions = isBank || isDealer || isAdmin;
   if (!hasActions) return null;
 
   return (
@@ -133,6 +135,11 @@ function SeatMenu({ player, isBank, isDealer, isSelf, pendingRequest, onSetStack
             Make bank
           </button>
         )}
+        {isAdmin && !isSelf && (
+          <button className="secondary danger" onClick={() => { onBoot(); setOpen(false); }}>
+            Remove player
+          </button>
+        )}
       </div>
     </Popover>
   );
@@ -142,12 +149,6 @@ const cardFlip = {
   initial: { opacity: 0, rotateY: 90, scale: 0.8 },
   animate: { opacity: 1, rotateY: 0, scale: 1 },
   exit: { opacity: 0, scale: 0.8 },
-};
-
-const holeFlip = {
-  initial: { opacity: 0, rotateY: 180, scale: 0.7 },
-  animate: { opacity: 1, rotateY: 0, scale: 1 },
-  exit: { opacity: 0, scale: 0.7 },
 };
 
 const cardSpring = { type: "spring" as const, stiffness: 300, damping: 20 };
@@ -177,13 +178,297 @@ function seatStyle(index: number, total: number): React.CSSProperties {
   };
 }
 
+function SeatCards({ p, choice, isYou, handNumber }: {
+  p: PlayerState;
+  choice: ShowChoice | undefined;
+  isYou: boolean;
+  handNumber: number;
+}) {
+  if (!p.inHand || p.folded) return null;
+
+  if (choice?.kind === "SHOW_0") {
+    return <div className="small" style={{ textAlign: "center", opacity: 0.55, marginTop: 4 }}>Mucked</div>;
+  }
+
+  const getCard = (ci: 0 | 1): string | null => {
+    if (!p.holeCards) return null;
+    if (isYou) return p.holeCards[ci];
+    if (choice?.kind === "SHOW_2") return p.holeCards[ci];
+    if (choice?.kind === "SHOW_1" && choice.cardIndex === ci) return p.holeCards[ci];
+    return null;
+  };
+
+  const cardFlipAnim = { initial: { opacity: 0, rotateY: 90 }, animate: { opacity: 1, rotateY: 0 }, exit: { opacity: 0, rotateY: -90 } };
+  const spring = { type: "spring" as const, stiffness: 320, damping: 22 };
+
+  return (
+    <div>
+      <div className="seatCards">
+        {([0, 1] as const).map(ci => {
+          const card = getCard(ci);
+          return (
+            <div key={ci} style={{ perspective: 600 }}>
+              <AnimatePresence mode="wait">
+                {card ? (
+                  <motion.div key={`${handNumber}-${card}`} {...cardFlipAnim} transition={{ ...spring, delay: ci * 0.08 }}>
+                    <CardPill c={card} size="lg" />
+                  </motion.div>
+                ) : (
+                  <motion.span
+                    key="back"
+                    className="playingCard card-back lg"
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, rotateY: 90, scale: 0.8 }}
+                    transition={{ duration: 0.22 }}
+                  />
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+      {p.bestHand && <div style={{ marginTop: 3 }}><span className="pill">{p.bestHand}</span></div>}
+    </div>
+  );
+}
+
+function ChipStack({ stack, maxStack }: { stack: number; maxStack: number }) {
+  if (stack <= 0 || maxStack <= 0) return null;
+  const ratio = Math.min(1, stack / maxStack);
+  const count = Math.max(1, Math.round(ratio * 8));
+  const color = ratio > 0.5
+    ? { bg: "linear-gradient(to right, #1e8449 30%, #27ae60 50%, #1e8449 70%)", shadow: "0 2px 0 #145a32, inset 0 1px 0 rgba(255,255,255,0.3)" }
+    : ratio > 0.25
+    ? { bg: "linear-gradient(to right, #d68910 30%, #f39c12 50%, #d68910 70%)", shadow: "0 2px 0 #7d6608, inset 0 1px 0 rgba(255,255,255,0.3)" }
+    : { bg: "linear-gradient(to right, #922b21 30%, #c0392b 50%, #922b21 70%)", shadow: "0 2px 0 #641e16, inset 0 1px 0 rgba(255,255,255,0.3)" };
+
+  return (
+    <div className="chipStackViz" title={`${stack} chips`}>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="chipDisc" style={{ background: color.bg, boxShadow: color.shadow }} />
+      ))}
+    </div>
+  );
+}
+
+function AdminConfigPanel({ settings, onApplyConfig, onSetRebuys, onAdvanceBlinds, onClose, nowMs }: {
+  settings: TableSettings;
+  onApplyConfig: (c: GameConfigUpdate) => void;
+  onSetRebuys: (enabled: boolean, minutes: number) => void;
+  onAdvanceBlinds: () => void;
+  onClose: () => void;
+  nowMs: number;
+}) {
+  const [tab, setTab] = useState<"schedule" | "rebuys" | "rules" | "json">("schedule");
+  const s = settings;
+  const [levels, setLevels] = useState<BlindLevel[]>(() => s.blindSchedule ?? []);
+  const [trigger, setTrigger] = useState<"manual" | "time" | "bust">(() => s.blindTrigger ?? "manual");
+  const [triggerMinutes, setTriggerMinutes] = useState(() => s.blindTriggerMinutes ?? 20);
+  const [triggerBusts, setTriggerBusts] = useState(() => s.blindTriggerBusts ?? 1);
+  const [rebuysEnabled, setRebuysEnabled] = useState(() => s.rebuysEnabled ?? false);
+  const [rebuysMinutes, setRebuysMinutes] = useState(60);
+  const [allowReveal, setAllowReveal] = useState(() => s.homeRules?.allowMidHandReveal ?? false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonError, setJsonError] = useState("");
+
+  const addLevel = () => {
+    const last = levels[levels.length - 1];
+    setLevels([...levels, { smallBlind: last?.bigBlind ?? s.bigBlind, bigBlind: (last?.bigBlind ?? s.bigBlind) * 2 }]);
+  };
+
+  const exportConfig = () => {
+    const cfg = {
+      blindSchedule: s.blindSchedule, blindTrigger: s.blindTrigger,
+      blindTriggerMinutes: s.blindTriggerMinutes, blindTriggerBusts: s.blindTriggerBusts,
+      straddleEnabled: s.straddleEnabled, rebuysEnabled: s.rebuysEnabled,
+      homeRules: s.homeRules,
+    };
+    setJsonText(JSON.stringify(cfg, null, 2));
+  };
+
+  const importConfig = () => {
+    try {
+      const cfg = JSON.parse(jsonText) as GameConfigUpdate;
+      onApplyConfig(cfg);
+      setJsonError("");
+    } catch { setJsonError("Invalid JSON — check formatting and try again."); }
+  };
+
+  const rebuysOpen = s.rebuysOpenUntil > 0 && s.rebuysOpenUntil > nowMs;
+
+  return (
+    <div className="recapOverlay" onClick={onClose}>
+      <div className="recapModal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+        <div className="title">⚙ Game Config <span style={{ fontSize: 12, fontWeight: 400 }}>(Admin only)</span></div>
+
+        <div className="hstack" style={{ gap: 6, margin: "12px 0 16px" }}>
+          {(["schedule", "rebuys", "rules", "json"] as const).map(t => (
+            <button key={t} className={tab === t ? "" : "secondary"} style={{ fontSize: 12 }} onClick={() => setTab(t)}>
+              {t === "schedule" ? "Blind Schedule" : t === "rebuys" ? "Rebuys" : t === "rules" ? "Home Rules" : "Save / Load"}
+            </button>
+          ))}
+        </div>
+
+        {tab === "schedule" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {s.blindLevelIndex >= 0 && (
+              <div className="small">Currently on level {s.blindLevelIndex + 1} of {s.blindSchedule.length}: <b>{s.smallBlind}/{s.bigBlind}</b></div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {levels.length === 0 && <div className="small" style={{ opacity: 0.6 }}>No levels — add one below.</div>}
+              {levels.map((l, i) => (
+                <div key={i} className="hstack" style={{ gap: 8 }}>
+                  <span className="small" style={{ width: 56, flexShrink: 0 }}>Level {i + 1}</span>
+                  <input type="number" value={l.smallBlind} min={1} style={{ width: 66 }}
+                    onChange={e => { const n = [...levels]; n[i] = { ...l, smallBlind: Number(e.target.value) }; setLevels(n); }} />
+                  <span className="small">/</span>
+                  <input type="number" value={l.bigBlind} min={1} style={{ width: 66 }}
+                    onChange={e => { const n = [...levels]; n[i] = { ...l, bigBlind: Number(e.target.value) }; setLevels(n); }} />
+                  <button className="secondary danger" onClick={() => setLevels(levels.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+              <button className="secondary" onClick={addLevel}>+ Add level</button>
+            </div>
+
+            <div>
+              <div className="small" style={{ marginBottom: 6 }}>Advance trigger</div>
+              <div className="hstack" style={{ gap: 12 }}>
+                {(["manual", "time", "bust"] as const).map(t => (
+                  <label key={t} className="hstack" style={{ gap: 4, cursor: "pointer" }}>
+                    <input type="radio" checked={trigger === t} onChange={() => setTrigger(t)} />
+                    <span className="small">{t === "manual" ? "Manual" : t === "time" ? "Time" : "Busts"}</span>
+                  </label>
+                ))}
+              </div>
+              {trigger === "time" && (
+                <div className="hstack" style={{ gap: 8, marginTop: 8 }}>
+                  <span className="small">Minutes per level:</span>
+                  <input type="number" value={triggerMinutes} min={1} style={{ width: 70 }} onChange={e => setTriggerMinutes(Number(e.target.value))} />
+                </div>
+              )}
+              {trigger === "bust" && (
+                <div className="hstack" style={{ gap: 8, marginTop: 8 }}>
+                  <span className="small">Player busts per advance:</span>
+                  <input type="number" value={triggerBusts} min={1} style={{ width: 70 }} onChange={e => setTriggerBusts(Number(e.target.value))} />
+                </div>
+              )}
+            </div>
+
+            <div className="hstack" style={{ gap: 8 }}>
+              <button onClick={() => onApplyConfig({ blindSchedule: levels, blindTrigger: trigger, blindTriggerMinutes: triggerMinutes, blindTriggerBusts: triggerBusts })}>
+                Apply Schedule
+              </button>
+              {s.blindLevelIndex >= 0 && s.blindLevelIndex + 1 < s.blindSchedule.length && (
+                <button className="secondary" onClick={onAdvanceBlinds}>Advance level now</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === "rebuys" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label className="hstack" style={{ gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={rebuysEnabled} onChange={e => setRebuysEnabled(e.target.checked)} />
+              <span>Rebuys allowed</span>
+            </label>
+            {rebuysEnabled && (
+              <div className="hstack" style={{ gap: 8 }}>
+                <span className="small">Close after (min, 0 = unlimited):</span>
+                <input type="number" value={rebuysMinutes} min={0} style={{ width: 70 }} onChange={e => setRebuysMinutes(Number(e.target.value))} />
+              </div>
+            )}
+            <button onClick={() => onSetRebuys(rebuysEnabled, rebuysMinutes)} style={{ alignSelf: "flex-start" }}>
+              {rebuysEnabled ? "Open Rebuy Window" : "Close Rebuys"}
+            </button>
+            {rebuysOpen && (
+              <div className="notice" style={{ borderColor: "rgba(100,220,100,0.4)", background: "rgba(100,220,100,0.08)" }}>
+                Window open{s.rebuysOpenUntil < Number.MAX_SAFE_INTEGER
+                  ? ` — closes in ~${Math.ceil((s.rebuysOpenUntil - nowMs) / 60_000)} min`
+                  : " (no time limit)"}.
+              </div>
+            )}
+            {!rebuysOpen && s.rebuysEnabled && <div className="notice">Rebuy window is closed.</div>}
+          </div>
+        )}
+
+        {tab === "rules" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontWeight: 600 }}>🏠 Home Game Rules</div>
+            <label className="hstack" style={{ gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={allowReveal} onChange={e => setAllowReveal(e.target.checked)} />
+              <div>
+                <div>Allow mid-hand card reveals</div>
+                <div className="small" style={{ opacity: 0.7 }}>Players can show their live hole cards to the table (against standard rules).</div>
+              </div>
+            </label>
+            <button style={{ alignSelf: "flex-start" }} onClick={() => onApplyConfig({ homeRules: { allowMidHandReveal: allowReveal } })}>
+              Apply Rules
+            </button>
+          </div>
+        )}
+
+        {tab === "json" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="small">Export the current config to JSON to save it, or paste a saved config to restore it.</div>
+            <div className="hstack" style={{ gap: 8 }}>
+              <button className="secondary" onClick={exportConfig}>Export config</button>
+              <button onClick={importConfig}>Import from JSON</button>
+            </div>
+            {jsonError && <div className="notice">{jsonError}</div>}
+            <textarea rows={12} style={{ fontFamily: "monospace", fontSize: 12, width: "100%", background: "#1a1a2e", color: "#e0e0e0", border: "1px solid #333", borderRadius: 6, padding: 8, boxSizing: "border-box" }}
+              value={jsonText} onChange={e => { setJsonText(e.target.value); setJsonError(""); }}
+              placeholder='Paste saved config JSON here, then click Import.' />
+          </div>
+        )}
+
+        <button className="secondary" style={{ marginTop: 16 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function RulesSummary({ settings, onClose, nowMs }: { settings: TableSettings; onClose: () => void; nowMs: number }) {
+  const s = settings;
+  const rebuysOpen = s.rebuysOpenUntil > 0 && s.rebuysOpenUntil > nowMs;
+  return (
+    <div className="recapOverlay" onClick={onClose}>
+      <div className="recapModal" onClick={e => e.stopPropagation()}>
+        <div className="title">📋 Table Rules</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 14 }}>
+          <div><b>Blinds:</b> {s.smallBlind}/{s.bigBlind}{s.straddleEnabled ? " · straddle on" : ""}</div>
+
+          {s.blindSchedule?.length > 0 && (
+            <div>
+              <b>Blind schedule</b> ({s.blindTrigger === "time" ? `every ${s.blindTriggerMinutes} min` : s.blindTrigger === "bust" ? `every ${s.blindTriggerBusts} bust${s.blindTriggerBusts > 1 ? "s" : ""}` : "manual advance"}):
+              <div className="hstack" style={{ flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {s.blindSchedule.map((l, i) => (
+                  <span key={i} className="pill" style={i === s.blindLevelIndex ? { background: "rgba(255,215,0,0.2)", borderColor: "rgba(255,215,0,0.5)" } : {}}>
+                    {i === s.blindLevelIndex ? "▶ " : ""}{l.smallBlind}/{l.bigBlind}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div><b>Rebuys:</b> {!s.rebuysEnabled ? "Not allowed" : rebuysOpen ? `Open${s.rebuysOpenUntil < Number.MAX_SAFE_INTEGER ? ` — ~${Math.ceil((s.rebuysOpenUntil - nowMs) / 60_000)} min left` : " (unlimited)"}` : "Closed"}</div>
+
+          <div><b>Home rules:</b> {s.homeRules?.allowMidHandReveal ? "Mid-hand card reveals allowed" : "Standard rules"}</div>
+        </div>
+        <button style={{ marginTop: 16 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 type ChipAnim = { id: number; seatIndex: number; amount: number };
 type DealAnim = { id: number; seatIndex: number; cardIndex: number };
 let animIdCounter = 0;
 
+const TABLE_ID = "default";
+
 export default function App() {
   const [conn, setConn] = useState<Conn>(null);
-  const [tableId, setTableId] = useState("homegame");
   const [name, setName] = useState(() => `Player${Math.floor(Math.random() * 90 + 10)}`);
   const [youId, setYouId] = useState<string | null>(null);
   const [state, setState] = useState<TableState | null>(null);
@@ -213,6 +498,17 @@ export default function App() {
   const [chipPromptOpen, setChipPromptOpen] = useState(false);
   const [chipPromptAmount, setChipPromptAmount] = useState(200);
   const [welcomeBack, setWelcomeBack] = useState<PlayerProfile | null>(null);
+  const [joinChipRequest, setJoinChipRequest] = useState(200);
+  const [watchOnly, setWatchOnly] = useState(false);
+  const [adminConfigOpen, setAdminConfigOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  // Tick for rebuy countdown & blind schedule progress
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 10_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -376,29 +672,33 @@ export default function App() {
 
   function join() {
     setError(null);
-    const storedPlayerId = localStorage.getItem(`sp-playerId-${tableId}`) ?? undefined;
-    const storedEmoji = localStorage.getItem(`sp-emoji-${tableId}`) ?? undefined;
+    const pendingChips = watchOnly ? 0 : joinChipRequest;
+    const storedPlayerId = localStorage.getItem(`sp-playerId-${TABLE_ID}`) ?? undefined;
+    const storedEmoji = localStorage.getItem(`sp-emoji-${TABLE_ID}`) ?? undefined;
+    let connRef: ReturnType<typeof connect> | null = null;
     const c = connect(
-      { tableId, name, playerId: storedPlayerId, emoji: storedEmoji },
+      { tableId: TABLE_ID, name, playerId: storedPlayerId, emoji: storedEmoji, watchOnly: watchOnly || undefined },
       (m: ServerToClient) => {
         if (m.type === "WELCOME") {
           setYouId(m.youId);
           setState(m.state);
-          localStorage.setItem(`sp-playerId-${tableId}`, m.youId);
+          localStorage.setItem(`sp-playerId-${TABLE_ID}`, m.youId);
           sessionIdRef.current = m.state.sessionId;
-          const me = m.state.players.find(p => p.id === m.youId);
-          if (me && me.stack === 0 && !sessionStorage.getItem(`sp-chip-prompted-${tableId}`)) setChipPromptOpen(true);
+          if (pendingChips > 0) {
+            connRef?.send({ type: "REQUEST_STACK", amount: pendingChips });
+          }
           if (m.profile && m.profile.sessions > 0) setWelcomeBack(m.profile);
         }
         else if (m.type === "STATE") { setState(m.state); }
         else if (m.type === "ERROR") { setError(m.message); }
         else if (m.type === "SESSION_ENDED") {
-          setError(`Session ended (table ${m.tableId}, session ${m.sessionId}). Refresh to start again.`);
+          setError(`Session ended. Refresh to start again.`);
           sessionIdRef.current = m.sessionId;
         }
       },
       setConnStatus
     );
+    connRef = c;
     setConn(c);
   }
 
@@ -406,7 +706,7 @@ export default function App() {
     const sid = sessionIdRef.current ?? state?.sessionId;
     if (!sid) return;
     setRecapLoading(true);
-    fetch(`/api/recap/${tableId}/${sid}`)
+    fetch(`/api/recap/${TABLE_ID}/${sid}`)
       .then(r => r.json())
       .then(data => { setRecap(data); setRecapOpen(true); })
       .catch(() => setError("Failed to load session recap."))
@@ -417,13 +717,11 @@ export default function App() {
     const sessionId = sid ?? sessionIdRef.current ?? state?.sessionId;
     if (!sessionId) return;
     setHandHistoryLoading(true);
-    // Load session list if opening fresh
     if (!sid) {
-      fetch(`/api/sessions/${tableId}`)
+      fetch(`/api/sessions/${TABLE_ID}`)
         .then(r => r.json())
         .then((ids: string[]) => {
           setAvailableSessions(ids);
-          // Ensure current session is in list (may not be written yet for ongoing session)
           if (sessionId && !ids.includes(sessionId)) {
             setAvailableSessions(prev => [...prev, sessionId]);
           }
@@ -431,7 +729,7 @@ export default function App() {
         .catch(() => {});
       setSelectedSessionId(sessionId);
     }
-    fetch(`/api/hands/${tableId}/${sessionId}`)
+    fetch(`/api/hands/${TABLE_ID}/${sessionId}`)
       .then(r => r.json())
       .then(data => { setHandHistory(data); setHandHistoryOpen(true); })
       .catch(() => setError("Failed to load hand history."))
@@ -445,21 +743,45 @@ export default function App() {
       <div className="table">
         <div className="card">
           <div className="title">Slow Poker</div>
-          <p className="small">Players at this table will appear after you join.</p>
 
-          <div className="row" style={{ marginTop: 12 }}>
-            <div className="card">
-              <div className="small">Table ID</div>
-              <input type="text" value={tableId} onChange={(e) => setTableId(e.target.value)} />
-            </div>
-            <div className="card">
+          <div className="row" style={{ marginTop: 16, gap: 12 }}>
+            <div className="card" style={{ flex: 1 }}>
               <div className="small">Your name</div>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && join()}
+                autoFocus
+              />
             </div>
+            {!watchOnly && (
+              <div className="card" style={{ flex: 1 }}>
+                <div className="small">Chips to request</div>
+                <input
+                  type="number"
+                  value={joinChipRequest}
+                  min={1}
+                  onChange={(e) => setJoinChipRequest(Math.max(1, Number(e.target.value)))}
+                  onKeyDown={(e) => e.key === "Enter" && join()}
+                />
+              </div>
+            )}
           </div>
 
-          <div style={{ marginTop: 12 }}>
-            <button onClick={join}>Join table</button>
+          <div className="hstack" style={{ marginTop: 12, gap: 12 }}>
+            <label className="hstack" style={{ gap: 6, cursor: "pointer", fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={watchOnly}
+                onChange={(e) => setWatchOnly(e.target.checked)}
+              />
+              Watch only (no chips)
+            </label>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <button onClick={join}>Join game</button>
           </div>
 
           {error && <div className="notice">{error}</div>}
@@ -470,6 +792,7 @@ export default function App() {
 
   const isDealer = !!you?.isDealer;
   const isBank = youId === state.bankPlayerId;
+  const isAdmin = youId === state.adminPlayerId;
 
   const toCall = you ? Math.max(0, state.streetBet - you.currentBet) : 0;
   const canAct = state.street !== "DONE" && state.street !== "SHOWDOWN" &&
@@ -493,10 +816,28 @@ export default function App() {
       {/* ── Top bar ── */}
       <div className="tableTop">
         <div>
-          <div className="title">Table: {state.tableId}</div>
+          <div className="title">Slow Poker {isAdmin ? "👑" : ""}</div>
           <div className="small">
             Session: {state.sessionId} • Hand #{state.handNumber} • {streetLabel(state.street)}
           </div>
+          {(() => {
+            const s = state.settings;
+            if (!s.blindSchedule?.length || s.blindLevelIndex < 0) return null;
+            const nextIdx = s.blindLevelIndex + 1;
+            const next = s.blindSchedule[nextIdx];
+            let hint = "";
+            if (s.blindTrigger === "time" && s.blindLevelStartedAt) {
+              const msLeft = (s.blindLevelStartedAt + s.blindTriggerMinutes * 60_000) - nowMs;
+              hint = next ? ` → ${next.smallBlind}/${next.bigBlind} in ~${Math.max(1, Math.ceil(msLeft / 60_000))} min` : " (final level)";
+            } else if (s.blindTrigger === "bust" && next) {
+              hint = ` → ${next.smallBlind}/${next.bigBlind} after ${s.blindTriggerBusts} bust${s.blindTriggerBusts > 1 ? "s" : ""}`;
+            } else if (next) {
+              hint = ` → ${next.smallBlind}/${next.bigBlind} (manual)`;
+            } else {
+              hint = " (final level)";
+            }
+            return <div className="small" style={{ opacity: 0.75 }}>Level {s.blindLevelIndex + 1}/{s.blindSchedule.length}: {s.smallBlind}/{s.bigBlind}{hint}</div>;
+          })()}
         </div>
         <div className="hstack">
           <Popover
@@ -511,7 +852,7 @@ export default function App() {
               autoShowPref={autoShowPref}
               onAutoShowChange={(v) => { setAutoShowPref(v); localStorage.setItem("sp-autoShow", v); }}
               onEmojiChange={(e) => {
-                localStorage.setItem(`sp-emoji-${tableId}`, e);
+                localStorage.setItem(`sp-emoji-${TABLE_ID}`, e);
                 send({ type: "SET_PROFILE", emoji: e });
               }}
               isBank={isBank}
@@ -519,7 +860,9 @@ export default function App() {
           </Popover>
           <span className="pill">Dealer: <b>{dealer?.name ?? "—"}</b></span>
           <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
-          <button className="secondary" onClick={fetchHandHistory} disabled={handHistoryLoading}>
+          <button className="secondary" onClick={() => setRulesOpen(true)}>Rules</button>
+          {isAdmin && <button className="secondary" onClick={() => setAdminConfigOpen(true)}>⚙ Config</button>}
+          <button className="secondary" onClick={() => fetchHandHistory()} disabled={handHistoryLoading}>
             {handHistoryLoading ? "Loading..." : "Hand History"}
           </button>
           <button className="secondary" onClick={() => {
@@ -578,6 +921,20 @@ export default function App() {
         </div>
       )}
 
+      {/* ── Rebuy countdown banner ── */}
+      {(() => {
+        const until = state.settings.rebuysOpenUntil;
+        if (!until || until <= nowMs) return null;
+        const msLeft = until - nowMs;
+        const minLeft = Math.ceil(msLeft / 60_000);
+        const isUrgent = msLeft < 5 * 60_000;
+        return (
+          <div className="chipAlert" style={isUrgent ? { background: "rgba(255,100,50,0.15)", borderColor: "rgba(255,100,50,0.5)" } : { borderColor: "rgba(100,220,100,0.4)", background: "rgba(100,220,100,0.07)" }}>
+            💰 Rebuy window {isUrgent ? <b>CLOSING in {minLeft} min!</b> : `open — ${minLeft} min remaining`}
+          </div>
+        );
+      })()}
+
       {/* ── Table ring: seats around an ellipse with board in center ── */}
       <div className="tableRing">
         {/* Center: board area */}
@@ -635,7 +992,7 @@ export default function App() {
                   transition={{ ...cardSpring, delay: i * 0.15 }}
                   style={{ perspective: 600 }}
                 >
-                  <CardPill c={c} />
+                  <CardPill c={c} size="md" />
                 </motion.div>
               )) : <span className="small">No board cards yet.</span>}
             </AnimatePresence>
@@ -721,7 +1078,9 @@ export default function App() {
         </div>
 
         {/* Seats around the ellipse */}
-        {seatPlayers.map((p, i) => {
+        {(() => {
+          const maxStack = Math.max(...state.players.map(p => p.stack), 1);
+          return seatPlayers.map((p, i) => {
           const isTurn = p.id === state.players[state.currentTurnIndex]?.id && inActiveHand;
           const isFolded = p.inHand && p.folded;
           const isSittingOut = !p.inHand || p.sittingOut;
@@ -730,7 +1089,7 @@ export default function App() {
           const isFolding = foldingPlayers.has(p.id);
           const showBankOnSeat = isBank;
           const showDealerOnSeat = isOtherSeat && isDealer && !p.isDealer;
-          const showGear = showBankOnSeat || showDealerOnSeat;
+          const showGear = showBankOnSeat || showDealerOnSeat || (isAdmin && isOtherSeat);
           return (
             <div
               key={p.id}
@@ -750,6 +1109,7 @@ export default function App() {
                   player={p}
                   isBank={isBank}
                   isDealer={isDealer && !p.isDealer}
+                  isAdmin={isAdmin && isOtherSeat}
                   isSelf={!isOtherSeat}
                   pendingRequest={state.stackRequests[p.id]}
                   onSetStack={(stack) => send({ type: "SET_STACK", playerId: p.id, stack })}
@@ -757,14 +1117,15 @@ export default function App() {
                   onMakeBank={() => send({ type: "SET_BANK", playerId: p.id })}
                   onApproveRequest={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
                   onDenyRequest={() => send({ type: "CLEAR_STACK_REQUEST", playerId: p.id })}
+                  onBoot={() => send({ type: "BOOT_PLAYER", playerId: p.id })}
                 />
               )}
               <div>
-                <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                   <b>{p.emoji ?? playerEmoji(state.players.findIndex(pp => pp.id === p.id))} {p.name}</b>
-                  {isSittingOut && state.street !== "DONE" && <span style={{ marginLeft: 4, fontSize: 12, opacity: 0.7 }}>💤</span>}
-                  {p.connected ? "" : <span className="small"> (disconnected)</span>}
-                  {/* Position badges — compare by player ID */}
+                  {p.id === state.adminPlayerId && <span title="Admin">👑</span>}
+                  {isSittingOut && state.street !== "DONE" && <span style={{ fontSize: 12, opacity: 0.7 }}>💤</span>}
+                  {!p.connected && <span className="small">(away)</span>}
                   {state.positions && state.street !== "DONE" && (
                     <>
                       {p.id === state.players[state.positions.buttonIndex]?.id && <span className="posBadge btn">BTN</span>}
@@ -773,9 +1134,28 @@ export default function App() {
                       {state.positions.straddleIndex !== null && p.id === state.players[state.positions.straddleIndex]?.id && <span className="posBadge str">STR</span>}
                     </>
                   )}
-                  {p.id === state.bankPlayerId ? <span className="pill" style={{ marginLeft: 8, fontSize: 10 }}>Bank</span> : null}
+                  {p.id === state.bankPlayerId && <span className="pill" style={{ fontSize: 10 }}>Bank</span>}
                 </div>
-                <div className="small">
+
+                {/* Cards + chip stack side by side */}
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+                  <SeatCards
+                    p={p}
+                    choice={state.showdownChoices[p.id]}
+                    isYou={p.id === youId}
+                    handNumber={state.handNumber}
+                  />
+                  {p.inHand && !p.folded && (
+                    <ChipStack stack={p.stack} maxStack={maxStack} />
+                  )}
+                </div>
+                {/* Showdown waiting label */}
+                {state.street === "SHOWDOWN" && p.inHand && !p.folded &&
+                 !state.showdownChoices[p.id] && p.id !== youId && (
+                  <div className="small" style={{ marginTop: 3, opacity: 0.65 }}>Waiting…</div>
+                )}
+
+                <div className="small" style={{ marginTop: 4 }}>
                   Stack: <b>{p.stack}</b>
                   <AnimatePresence>
                     {stackDeltas[p.id] != null && (
@@ -790,64 +1170,18 @@ export default function App() {
                       </motion.span>
                     )}
                   </AnimatePresence>
-                  {" "}• Bet: <b>{p.currentBet}</b> • {p.inHand ? (p.folded ? "Folded" : "In hand") : "Sitting out"}
+                  {inActiveHand && <>{" "}• Bet: <b>{p.currentBet}</b></>}
+                  {" "}• {p.inHand ? (p.folded ? "Folded" : "In hand") : "Out"}
                 </div>
               </div>
 
-              {/* Show revealed cards on any street, or showdown status */}
-              {p.id !== youId && p.holeCards && state.showdownChoices[p.id]?.kind === "SHOW_2" && state.street !== "SHOWDOWN" && (
-                <div style={{ marginTop: 8 }}>
-                  <div className="holeCards">
-                    <AnimatePresence>
-                      {p.holeCards.map((c, ci) => (
-                        <motion.div
-                          key={c}
-                          {...cardFlip}
-                          transition={{ ...cardSpring, delay: ci * 0.1 }}
-                          style={{ perspective: 600 }}
-                        >
-                          <CardPill c={c} />
-                        </motion.div>
-                      ))}
-                    </AnimatePresence>
-                  </div>
-                  {p.bestHand && <span className="pill">{p.bestHand}</span>}
-                </div>
-              )}
-              {state.street === "SHOWDOWN" && p.id !== youId && (
-                <div style={{ marginTop: 8 }}>
-                  {p.holeCards ? (
-                    <div>
-                      <div className="holeCards">
-                        <AnimatePresence>
-                          {p.holeCards.map((c, ci) => (
-                            <motion.div
-                              key={c}
-                              {...cardFlip}
-                              transition={{ ...cardSpring, delay: ci * 0.1 }}
-                              style={{ perspective: 600 }}
-                            >
-                              <CardPill c={c} />
-                            </motion.div>
-                          ))}
-                        </AnimatePresence>
-                      </div>
-                      {p.bestHand && <span className="pill">{p.bestHand}</span>}
-                    </div>
-                  ) : (
-                    <div className="small">
-                      {state.showdownChoices[p.id] ? renderChoice(state.showdownChoices[p.id]) : "Waiting..."}
-                    </div>
-                  )}
-                </div>
-              )}
-              {/* Fold card-back ghost — two card backs that float off the seat when player folds */}
+              {/* Fold card-back ghost */}
               <AnimatePresence>
                 {isFolding && (
                   <motion.div
                     className="foldGhost"
                     initial={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -18, scale: 0.75 }}
+                    exit={{ opacity: 0, y: -22, scale: 0.75 }}
                     transition={{ duration: 0.6, ease: "easeIn" }}
                   >
                     <span className="playingCard card-back foldCard" />
@@ -857,30 +1191,15 @@ export default function App() {
               </AnimatePresence>
             </div>
           );
-        })}
+        });
+      })()}
       </div>
 
-      {/* ── Your hole cards ── */}
+      {/* ── Reveal buttons + sit-out ── */}
       <div className="holeArea">
-        <div style={{ fontWeight: 600 }}>Your Hand</div>
-        <div className="holeCards">
-          <AnimatePresence mode="wait" key={state.handNumber}>
-            {you?.holeCards ? you.holeCards.map((c, i) => (
-              <motion.div
-                key={c}
-                {...holeFlip}
-                transition={{ ...cardSpring, delay: i * 0.1 }}
-                style={{ perspective: 600 }}
-              >
-                <CardPill c={c} />
-              </motion.div>
-            )) : <span className="small">Start a hand to deal cards.</span>}
-          </AnimatePresence>
-        </div>
-        {you?.bestHand && <span className="pill">{you.bestHand}</span>}
         {you?.folded && you?.holeCards && !state.showdownChoices[youId] && state.street !== "DONE" && (
-          <div className="hstack" style={{ gap: 6, marginTop: 6 }}>
-            <span className="small">Show?</span>
+          <div className="hstack" style={{ gap: 6 }}>
+            <span className="small">Show folded hand?</span>
             <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
               {formatCard(you.holeCards![0])}
             </button>
@@ -891,8 +1210,8 @@ export default function App() {
           </div>
         )}
         {you?.holeCards && !state.showdownChoices[youId] && state.street === "DONE" && (
-          <div className="hstack" style={{ gap: 6, marginTop: 6 }}>
-            <span className="small">Show?</span>
+          <div className="hstack" style={{ gap: 6 }}>
+            <span className="small">Show hand?</span>
             <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
               {formatCard(you.holeCards![0])}
             </button>
@@ -902,10 +1221,21 @@ export default function App() {
             <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
           </div>
         )}
-        <div className="small">
-          Stack: <b>{you?.stack ?? 0}</b> • Bet: <b>{you?.currentBet ?? 0}</b> • To call: <b>{toCall}</b>
-        </div>
-        <label className="hstack" style={{ gap: 6, marginTop: 6, cursor: state.street === "DONE" ? "pointer" : "default" }}>
+        {state.settings.homeRules?.allowMidHandReveal &&
+         you?.inHand && !you.folded && !state.showdownChoices[youId] &&
+         state.street !== "DONE" && state.street !== "SHOWDOWN" && you.holeCards && (
+          <div className="hstack" style={{ gap: 6 }}>
+            <span className="small" style={{ color: "#ffaa44" }}>Show live:</span>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
+              {formatCard(you.holeCards![0])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
+              {formatCard(you.holeCards![1])}
+            </button>
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+          </div>
+        )}
+        <label className="hstack" style={{ gap: 6, cursor: state.street === "DONE" ? "pointer" : "default" }}>
           <input
             type="checkbox"
             checked={!!you?.sittingOut}
@@ -1208,15 +1538,32 @@ export default function App() {
                 onChange={(e) => setChipPromptAmount(Number(e.target.value))}
                 style={{ width: 100 }}
               />
-              <button onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${tableId}`, "1"); send({ type: "REQUEST_STACK", amount: chipPromptAmount }); setChipPromptOpen(false); }}>
+              <button onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${TABLE_ID}`, "1"); send({ type: "REQUEST_STACK", amount: chipPromptAmount }); setChipPromptOpen(false); }}>
                 Request from bank
               </button>
             </div>
-            <button className="secondary" style={{ marginTop: 8 }} onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${tableId}`, "1"); setChipPromptOpen(false); }}>
+            <button className="secondary" style={{ marginTop: 8 }} onClick={() => { sessionStorage.setItem(`sp-chip-prompted-${TABLE_ID}`, "1"); setChipPromptOpen(false); }}>
               Just watch for now
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── Admin config modal ── */}
+      {adminConfigOpen && (
+        <AdminConfigPanel
+          settings={state.settings}
+          onApplyConfig={(cfg) => { send({ type: "SET_CONFIG", config: cfg }); }}
+          onSetRebuys={(enabled, minutes) => { send({ type: "SET_REBUYS", enabled, minutes }); }}
+          onAdvanceBlinds={() => { send({ type: "ADVANCE_BLINDS" }); }}
+          onClose={() => setAdminConfigOpen(false)}
+          nowMs={nowMs}
+        />
+      )}
+
+      {/* ── Rules summary modal ── */}
+      {rulesOpen && (
+        <RulesSummary settings={state.settings} onClose={() => setRulesOpen(false)} nowMs={nowMs} />
       )}
 
       {/* ── Welcome back toast ── */}

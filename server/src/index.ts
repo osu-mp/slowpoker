@@ -101,8 +101,6 @@ function broadcastState(tableId: string, table: Table) {
 
 const app = express();
 app.use(cors());
-// Tell ngrok (and similar tunnels) to skip the browser interstitial for all responses
-app.use((_req, res, next) => { res.setHeader("ngrok-skip-browser-warning", "1"); next(); });
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const sessionsDir = path.join(process.cwd(), "data", "sessions");
@@ -174,7 +172,7 @@ wss.on("connection", (ws) => {
           }
         }
         if (!player) {
-          player = table.addPlayer(msg.name, msg.emoji);
+          player = table.addPlayer(msg.name, msg.emoji, msg.watchOnly);
         }
 
         current = { ws, tableId: msg.tableId, playerId: player.id };
@@ -201,6 +199,20 @@ wss.on("connection", (ws) => {
         case "NEXT_STREET": table.nextStreet(current.playerId); break;
         case "SHOWDOWN_CHOICE": table.setShowdownChoice(current.playerId, msg.choice); break;
         case "REVEAL_HAND": table.revealHand(current.playerId, msg.choice); break;
+        case "SET_CONFIG": table.setConfig(current.playerId, msg.config); break;
+        case "SET_REBUYS": table.setRebuys(current.playerId, msg.enabled, msg.minutes); break;
+        case "ADVANCE_BLINDS": table.advanceBlinds(current.playerId); break;
+        case "BOOT_PLAYER": {
+          table.bootPlayer(current.playerId, msg.playerId);
+          for (const c of conns) {
+            if (c.playerId === msg.playerId && c.tableId === current.tableId) {
+              send(c.ws, { type: "ERROR", message: "You were removed from the table by the admin." });
+              c.ws.close();
+              conns.delete(c);
+            }
+          }
+          break;
+        }
         case "SIT_OUT": table.setSitOut(current.playerId, true); break;
         case "SIT_IN": table.setSitOut(current.playerId, false); break;
         case "REQUEST_STACK": table.requestStack(current.playerId, msg.amount); break;

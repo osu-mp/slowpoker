@@ -27,10 +27,31 @@ export type PlayerState = {
   bestHand?: string;
 };
 
+export type BlindLevel = { smallBlind: number; bigBlind: number };
+
 export type TableSettings = {
   smallBlind: number;
   bigBlind: number;
   straddleEnabled: boolean;
+  blindSchedule: BlindLevel[];
+  blindTrigger: "manual" | "time" | "bust";
+  blindTriggerMinutes: number;
+  blindTriggerBusts: number;
+  blindLevelIndex: number;      // -1 = static blinds; 0+ = current schedule level
+  blindLevelStartedAt: number;  // ms timestamp when current level began
+  blindPlayersAtStart: number;  // players with chips when level began (bust trigger)
+  rebuysEnabled: boolean;
+  rebuysOpenUntil: number;      // 0 = closed; >0 = closes at this ms timestamp
+  homeRules: { allowMidHandReveal: boolean };
+};
+
+export type GameConfigUpdate = {
+  blindSchedule?: BlindLevel[];
+  blindTrigger?: "manual" | "time" | "bust";
+  blindTriggerMinutes?: number;
+  blindTriggerBusts?: number;
+  straddleEnabled?: boolean;
+  homeRules?: { allowMidHandReveal: boolean };
 };
 
 export type HandPositions = {
@@ -44,6 +65,7 @@ export type TableState = {
   tableId: string;
   sessionId: string;
   createdAt: number;
+  adminPlayerId?: string;
   bankPlayerId?: string;
   settings: TableSettings;
   positions: HandPositions | null;
@@ -79,7 +101,11 @@ export type PlayerAction =
   | { kind: "RAISE"; to: number };
 
 export type ClientToServer =
-  | { type: "HELLO"; tableId: string; name: string; playerId?: string; emoji?: string }
+  | { type: "HELLO"; tableId: string; name: string; playerId?: string; emoji?: string; watchOnly?: boolean }
+  | { type: "BOOT_PLAYER"; playerId: string }
+  | { type: "SET_CONFIG"; config: GameConfigUpdate }
+  | { type: "SET_REBUYS"; enabled: boolean; minutes: number }
+  | { type: "ADVANCE_BLINDS" }
   | { type: "SET_PROFILE"; emoji: string }
   | { type: "SET_DEALER"; playerId: string }
   | { type: "SET_STACK"; playerId: string; stack: number }

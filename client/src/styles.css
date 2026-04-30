@@ -123,16 +123,17 @@ input[type="range"] { padding: 0; height: 28px; }
   margin-top: 8px;
 }
 
-/* ── Hole cards area ── */
+/* ── Sit-out / reveal bar ── */
 .holeArea {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 12px;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 16px;
+  border-radius: 12px;
 }
 .holeCards {
   display: flex;
@@ -154,6 +155,7 @@ input[type="range"] { padding: 0; height: 28px; }
   font-family: ui-sans-serif, system-ui, sans-serif;
   line-height: 1;
   user-select: none;
+  flex-shrink: 0;
 }
 .playingCard.red { color: #e74c3c; }
 .playingCard.white { color: #f0f0f0; }
@@ -168,6 +170,50 @@ input[type="range"] { padding: 0; height: 28px; }
 .playingCard.card-back {
   background: linear-gradient(135deg, #2c3e50, #34495e);
   border-color: rgba(255,255,255,0.15);
+}
+
+/* Medium — board cards */
+.playingCard.md {
+  width: 54px;
+  height: 76px;
+  border-radius: 7px;
+}
+.playingCard.md .rank { font-size: 21px; }
+.playingCard.md .suit { font-size: 16px; }
+
+/* Large — hole cards in seats and your hand area */
+.playingCard.lg {
+  width: 66px;
+  height: 93px;
+  border-radius: 8px;
+  border-width: 2px;
+}
+.playingCard.lg .rank { font-size: 26px; }
+.playingCard.lg .suit { font-size: 20px; }
+
+/* Seat card area */
+.seatCards {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+/* ── Chip stack visualization ── */
+.chipStackViz {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 0;
+  padding-bottom: 2px;
+}
+.chipDisc {
+  width: 22px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: -2px;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.25);
+  border: 1px solid rgba(0,0,0,0.35);
+  flex-shrink: 0;
 }
 
 /* ── Ring seat layout ── */
@@ -191,7 +237,7 @@ input[type="range"] { padding: 0; height: 28px; }
 .seat {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 170px;
+  width: 200px;
   padding: 10px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.15);
@@ -247,9 +293,9 @@ input[type="range"] { padding: 0; height: 28px; }
   z-index: 10;
 }
 .foldCard {
-  width: 26px !important;
-  height: 36px !important;
-  border-radius: 5px;
+  width: 36px !important;
+  height: 50px !important;
+  border-radius: 6px;
   opacity: 0.65;
 }
 
@@ -637,12 +683,11 @@ body.reconnecting::after {
   .tableTop { flex-direction: column; align-items: flex-start; }
   .tableRing { min-height: auto; display: flex; flex-direction: column; gap: 10px; }
   .ringCenter { position: static; transform: none; width: 100%; max-width: 100%; }
-  .seat { position: static !important; transform: none !important; width: 100% !important; }
+  .seat { position: static !important; transform: none !important; width: 100% !important; max-width: 100% !important; }
   .actionBar { flex-direction: column; align-items: stretch; }
   .betSizing { flex-direction: column; }
   button.action-primary { width: 100%; min-height: 52px; font-size: 18px; }
   button { min-height: 44px; }
-  .holeArea { flex-direction: column; }
   input[type="range"] { height: 36px; }
   input[type="range"]::-webkit-slider-thumb { width: 28px; height: 28px; }
   input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; }

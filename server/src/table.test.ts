@@ -820,14 +820,14 @@ function actionPayloads() {
   return vi.mocked(appendEvent).mock.calls
     .map(([e]) => e)
     .filter(e => e.type === "ACTION")
-    .map(e => e.payload);
+    .map(e => e.payload as { action: { kind: string }; allIn?: boolean } | undefined);
 }
 
 function postPayloads() {
   return vi.mocked(appendEvent).mock.calls
     .map(([e]) => e)
     .filter(e => e.type === "POST")
-    .map(e => e.payload);
+    .map(e => e.payload as { label: string; playerId: string; allIn?: boolean } | undefined);
 }
 
 describe("all-in event detection", () => {

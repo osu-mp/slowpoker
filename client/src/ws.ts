@@ -7,6 +7,7 @@ export type ConnConfig = {
   name: string;
   playerId?: string;
   emoji?: string;
+  watchOnly?: boolean;
 };
 
 function getWsUrl(): string {
@@ -40,6 +41,7 @@ export function connect(
       const hello: ClientToServer = { type: "HELLO", tableId: config.tableId, name: config.name };
       if (config.playerId) (hello as any).playerId = config.playerId;
       if (config.emoji) (hello as any).emoji = config.emoji;
+      if (config.watchOnly) (hello as any).watchOnly = true;
       ws!.send(JSON.stringify(hello));
       // Flush queued messages
       while (queue.length && ws!.readyState === WebSocket.OPEN) {
