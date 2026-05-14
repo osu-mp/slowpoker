@@ -37,13 +37,25 @@ function streetLabel(s: Street) {
   }
 }
 
+function nextStreetLabel(s: Street): string {
+  switch (s) {
+    case "PREFLOP": return "Flop";
+    case "FLOP": return "Turn";
+    case "TURN": return "River";
+    case "RIVER": return "Showdown";
+    default: return "Next";
+  }
+}
+
+const SUIT_COLOR_CLASS: Record<string, string> = { s: "white", h: "red", d: "blue", c: "green" };
+
 function CardPill({ c, size = "" }: { c: string; size?: "md" | "lg" | "" }) {
   const rank = c.slice(0, -1);
   const suitChar = c.slice(-1);
   const glyph = SUIT_GLYPHS[suitChar] ?? suitChar;
-  const isRed = suitChar === "h" || suitChar === "d";
+  const colorClass = SUIT_COLOR_CLASS[suitChar] ?? "white";
   return (
-    <span className={`playingCard ${isRed ? "red" : "white"}${size ? " " + size : ""}`}>
+    <span className={`playingCard ${colorClass}${size ? " " + size : ""}`}>
       <span className="rank">{rank}</span>
       <span className="suit">{glyph}</span>
     </span>
@@ -169,7 +181,7 @@ function AnimatedNumber({ value }: { value: number }) {
 }
 
 function seatStyle(index: number, total: number): React.CSSProperties {
-  const angle = (Math.PI / 2) + (index / total) * 2 * Math.PI;
+  const angle = (Math.PI / 2) - (index / total) * 2 * Math.PI;
   const rx = 44, ry = 40; // ellipse radii as % of container
   return {
     position: "absolute",
@@ -178,11 +190,12 @@ function seatStyle(index: number, total: number): React.CSSProperties {
   };
 }
 
-function SeatCards({ p, choice, isYou, handNumber }: {
+function SeatCards({ p, choice, isYou, handNumber, showOuts }: {
   p: PlayerState;
   choice: ShowChoice | undefined;
   isYou: boolean;
   handNumber: number;
+  showOuts: boolean;
 }) {
   if (!p.inHand || p.folded) return null;
 
@@ -229,6 +242,11 @@ function SeatCards({ p, choice, isYou, handNumber }: {
         })}
       </div>
       {p.bestHand && <div style={{ marginTop: 3 }}><span className="pill">{p.bestHand}</span></div>}
+      {isYou && showOuts && p.outs !== undefined && p.outs > 0 && (
+        <div style={{ marginTop: 3 }}>
+          <span className="pill outs-badge" title="Flush/straight draw outs only">{p.outs} outs</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -269,6 +287,8 @@ function AdminConfigPanel({ settings, onApplyConfig, onSetRebuys, onAdvanceBlind
   const [rebuysEnabled, setRebuysEnabled] = useState(() => s.rebuysEnabled ?? false);
   const [rebuysMinutes, setRebuysMinutes] = useState(60);
   const [allowReveal, setAllowReveal] = useState(() => s.homeRules?.allowMidHandReveal ?? false);
+  const [clockSecs, setClockSecs] = useState(() => s.clockSeconds ?? 30);
+  const [allowOuts, setAllowOuts] = useState(() => s.homeRules?.showOuts ?? false);
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState("");
 
@@ -402,7 +422,20 @@ function AdminConfigPanel({ settings, onApplyConfig, onSetRebuys, onAdvanceBlind
                 <div className="small" style={{ opacity: 0.7 }}>Players can show their live hole cards to the table (against standard rules).</div>
               </div>
             </label>
-            <button style={{ alignSelf: "flex-start" }} onClick={() => onApplyConfig({ homeRules: { allowMidHandReveal: allowReveal } })}>
+            <label className="hstack" style={{ gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={allowOuts} onChange={e => setAllowOuts(e.target.checked)} />
+              <div>
+                <div>Show draw outs</div>
+                <div className="small" style={{ opacity: 0.7 }}>Each player sees their own flush/straight draw outs on their seat (flop &amp; turn only). Opponents see nothing — only you see your own count.</div>
+              </div>
+            </label>
+            <div className="hstack" style={{ gap: 8, alignItems: "center" }}>
+              <span className="small">Call clock — seconds to act:</span>
+              <input type="number" min={0} max={300} value={clockSecs} style={{ width: 66 }}
+                onChange={e => setClockSecs(Math.max(0, Number(e.target.value)))} />
+              <span className="small" style={{ opacity: 0.6 }}>(0 = disabled)</span>
+            </div>
+            <button style={{ alignSelf: "flex-start" }} onClick={() => onApplyConfig({ homeRules: { allowMidHandReveal: allowReveal, showOuts: allowOuts }, clockSeconds: clockSecs })}>
               Apply Rules
             </button>
           </div>
@@ -423,6 +456,95 @@ function AdminConfigPanel({ settings, onApplyConfig, onSetRebuys, onAdvanceBlind
         )}
 
         <button className="secondary" style={{ marginTop: 16 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+type ChipSnapshot = { hand: number; stacks: Record<string, number>; names: Record<string, string> };
+
+const CHART_COLORS = ['#4fc3f7','#81c784','#ffb74d','#e57373','#ba68c8','#4db6ac','#fff176','#f48fb1'];
+
+function ChipChart({ history, youId, onClose }: { history: ChipSnapshot[]; youId: string; onClose: () => void }) {
+  return (
+    <div className="recapOverlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 560, width: "96vw" }} onClick={e => e.stopPropagation()}>
+        <div className="title">📊 Chip History</div>
+        {history.length < 2
+          ? <div className="small" style={{ padding: "20px 0", textAlign: "center" }}>Play at least 2 hands to see the chart.</div>
+          : <ChipChartSVG history={history} youId={youId} />
+        }
+        <button style={{ marginTop: 16 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function ChipChartSVG({ history, youId }: { history: ChipSnapshot[]; youId: string }) {
+  const W = 500, H = 280, ML = 52, MR = 16, MT = 14, MB = 32;
+  const PW = W - ML - MR, PH = H - MT - MB;
+
+  const playerIds = [...new Set(history.flatMap(s => Object.keys(s.stacks)))];
+  const names: Record<string, string> = {};
+  for (const s of history) Object.assign(names, s.names);
+
+  const allVals = history.flatMap(s => Object.values(s.stacks));
+  const minY = Math.min(...allVals), maxY = Math.max(...allVals);
+  const yRange = maxY - minY || 1;
+
+  const xOf = (i: number) => ML + (i / Math.max(history.length - 1, 1)) * PW;
+  const yOf = (v: number) => MT + PH - ((v - minY) / yRange) * PH;
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => ({
+    y: MT + t * PH,
+    label: Math.round(maxY - t * yRange),
+  }));
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {/* Grid + Y labels */}
+        {yTicks.map(({ y, label }) => (
+          <g key={label}>
+            <line x1={ML} y1={y} x2={ML + PW} y2={y} stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+            <text x={ML - 5} y={y + 4} textAnchor="end" fill="rgba(255,255,255,0.45)" fontSize={10}>{label}</text>
+          </g>
+        ))}
+        {/* X labels */}
+        {history.map((s, i) => (
+          <text key={i} x={xOf(i)} y={H - MB + 14} textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize={10}>{s.hand}</text>
+        ))}
+        <text x={ML + PW / 2} y={H} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize={9}>Hand</text>
+        {/* Axes */}
+        <line x1={ML} y1={MT} x2={ML} y2={MT + PH} stroke="rgba(255,255,255,0.25)" strokeWidth={1} />
+        <line x1={ML} y1={MT + PH} x2={ML + PW} y2={MT + PH} stroke="rgba(255,255,255,0.25)" strokeWidth={1} />
+        {/* Player lines */}
+        {playerIds.map((id, ci) => {
+          const color = CHART_COLORS[ci % CHART_COLORS.length];
+          const isYou = id === youId;
+          const pts = history
+            .map((s, i) => s.stacks[id] !== undefined ? { x: xOf(i), y: yOf(s.stacks[id]) } : null)
+            .filter(Boolean) as { x: number; y: number }[];
+          if (pts.length === 0) return null;
+          const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+          return (
+            <g key={id}>
+              <path d={d} fill="none" stroke={color} strokeWidth={isYou ? 2.5 : 1.5} strokeOpacity={isYou ? 1 : 0.65} />
+              {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={isYou ? 4 : 3} fill={color} opacity={isYou ? 1 : 0.75} />)}
+            </g>
+          );
+        })}
+      </svg>
+      {/* Legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 10 }}>
+        {playerIds.map((id, ci) => (
+          <div key={id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+            <div style={{ width: 18, height: 3, background: CHART_COLORS[ci % CHART_COLORS.length], borderRadius: 2 }} />
+            <span style={{ fontWeight: id === youId ? 700 : 400, opacity: id === youId ? 1 : 0.8 }}>
+              {names[id] ?? id}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -453,7 +575,10 @@ function RulesSummary({ settings, onClose, nowMs }: { settings: TableSettings; o
 
           <div><b>Rebuys:</b> {!s.rebuysEnabled ? "Not allowed" : rebuysOpen ? `Open${s.rebuysOpenUntil < Number.MAX_SAFE_INTEGER ? ` — ~${Math.ceil((s.rebuysOpenUntil - nowMs) / 60_000)} min left` : " (unlimited)"}` : "Closed"}</div>
 
-          <div><b>Home rules:</b> {s.homeRules?.allowMidHandReveal ? "Mid-hand card reveals allowed" : "Standard rules"}</div>
+          <div><b>Home rules:</b> {[
+            s.homeRules?.allowMidHandReveal && "Mid-hand reveals",
+            s.homeRules?.showOuts && "Draw outs display",
+          ].filter(Boolean).join(", ") || "Standard rules"}</div>
         </div>
         <button style={{ marginTop: 16 }} onClick={onClose}>Close</button>
       </div>
@@ -502,6 +627,8 @@ export default function App() {
   const [watchOnly, setWatchOnly] = useState(false);
   const [adminConfigOpen, setAdminConfigOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
+  const [chipHistory, setChipHistory] = useState<ChipSnapshot[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
 
   // Tick for rebuy countdown & blind schedule progress
@@ -509,6 +636,15 @@ export default function App() {
     const id = setInterval(() => setNowMs(Date.now()), 10_000);
     return () => clearInterval(id);
   }, []);
+
+  // Fast tick for clock countdown — only runs while a clock is active
+  const [clockNow, setClockNow] = useState(Date.now());
+  useEffect(() => {
+    if (!state?.clockEndsAt) return;
+    setClockNow(Date.now());
+    const id = setInterval(() => setClockNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [state?.clockEndsAt]);
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -519,6 +655,18 @@ export default function App() {
   const [foldingPlayers, setFoldingPlayers] = useState<Set<string>>(new Set());
   const [stackDeltas, setStackDeltas] = useState<Record<string, number>>({});
   const prevStateRef = useRef<TableState | null>(null);
+
+  // Record chip snapshot after each hand completes
+  useEffect(() => {
+    if (!state || state.street !== "DONE" || state.handNumber === 0) return;
+    setChipHistory(prev => {
+      if (prev[prev.length - 1]?.hand === state.handNumber) return prev;
+      const stacks: Record<string, number> = {};
+      const names: Record<string, string> = {};
+      for (const p of state.players) { stacks[p.id] = p.stack; names[p.id] = p.name; }
+      return [...prev, { hand: state.handNumber, stacks, names }];
+    });
+  }, [state?.street, state?.handNumber]);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
   const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
@@ -794,6 +942,10 @@ export default function App() {
   const isBank = youId === state.bankPlayerId;
   const isAdmin = youId === state.adminPlayerId;
 
+  const myRevealChoice = youId ? state.showdownChoices[youId] : undefined;
+  const myCardShowing0 = myRevealChoice?.kind === "SHOW_2" || (myRevealChoice?.kind === "SHOW_1" && myRevealChoice.cardIndex === 0);
+  const myCardShowing1 = myRevealChoice?.kind === "SHOW_2" || (myRevealChoice?.kind === "SHOW_1" && myRevealChoice.cardIndex === 1);
+
   const toCall = you ? Math.max(0, state.streetBet - you.currentBet) : 0;
   const canAct = state.street !== "DONE" && state.street !== "SHOWDOWN" &&
     state.players[state.currentTurnIndex]?.id === youId &&
@@ -865,6 +1017,7 @@ export default function App() {
           <button className="secondary" onClick={() => fetchHandHistory()} disabled={handHistoryLoading}>
             {handHistoryLoading ? "Loading..." : "Hand History"}
           </button>
+          <button className="secondary" onClick={() => setChartOpen(true)} title="Chip history chart">📊</button>
           <button className="secondary" onClick={() => {
             const next = !soundEnabled;
             setSoundEnabled(next);
@@ -1030,7 +1183,7 @@ export default function App() {
         <div className="chipAnimationLayer">
           <AnimatePresence>
             {chipAnimations.map((chip) => {
-              const angle = (Math.PI / 2) + (chip.seatIndex / seatCount) * 2 * Math.PI;
+              const angle = (Math.PI / 2) - (chip.seatIndex / seatCount) * 2 * Math.PI;
               const rx = 44, ry = 40;
               const startLeft = `${50 - rx * Math.cos(angle)}%`;
               const startTop = `${50 + ry * Math.sin(angle)}%`;
@@ -1053,7 +1206,7 @@ export default function App() {
           </AnimatePresence>
           <AnimatePresence>
             {dealAnimations.map((deal) => {
-              const angle = (Math.PI / 2) + (deal.seatIndex / seatCount) * 2 * Math.PI;
+              const angle = (Math.PI / 2) - (deal.seatIndex / seatCount) * 2 * Math.PI;
               const rx = 44, ry = 40;
               const endLeft = `${50 - rx * Math.cos(angle)}%`;
               const endTop = `${50 + ry * Math.sin(angle)}%`;
@@ -1144,7 +1297,16 @@ export default function App() {
                     choice={state.showdownChoices[p.id]}
                     isYou={p.id === youId}
                     handNumber={state.handNumber}
+                    showOuts={!!state.settings.homeRules?.showOuts}
                   />
+                  {/* High-card draw result */}
+                  {state.highCardRound?.cards[p.id] && (
+                    <div className="seatCards" style={{ opacity: state.highCardRound.tiedIds.includes(p.id) || state.highCardRound.winnerId === p.id ? 1 : 0.45 }}>
+                      <CardPill c={state.highCardRound.cards[p.id]} size="lg" />
+                      {state.highCardRound.winnerId === p.id && <span style={{ fontSize: 11, marginLeft: 3 }}>👑</span>}
+                      {state.highCardRound.tiedIds.includes(p.id) && <span style={{ fontSize: 11, marginLeft: 3 }}>🔄</span>}
+                    </div>
+                  )}
                   {p.inHand && !p.folded && (
                     <ChipStack stack={p.stack} maxStack={maxStack} />
                   )}
@@ -1197,42 +1359,48 @@ export default function App() {
 
       {/* ── Reveal buttons + sit-out ── */}
       <div className="holeArea">
-        {you?.folded && you?.holeCards && !state.showdownChoices[youId] && state.street !== "DONE" && (
+        {you?.folded && you?.holeCards && state.street !== "DONE" && (
           <div className="hstack" style={{ gap: 6 }}>
             <span className="small">Show folded hand?</span>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
-              {formatCard(you.holeCards![0])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing0 ? (myCardShowing1 ? { kind: "SHOW_1", cardIndex: 1 } : { kind: "SHOW_0" }) : (myCardShowing1 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 0 }) })}>
+              {myCardShowing0 ? "Hide" : formatCard(you.holeCards![0])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
-              {formatCard(you.holeCards![1])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing1 ? (myCardShowing0 ? { kind: "SHOW_1", cardIndex: 0 } : { kind: "SHOW_0" }) : (myCardShowing0 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 1 }) })}>
+              {myCardShowing1 ? "Hide" : formatCard(you.holeCards![1])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            {myRevealChoice?.kind !== "SHOW_2" && (
+              <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            )}
           </div>
         )}
-        {you?.holeCards && !state.showdownChoices[youId] && state.street === "DONE" && (
+        {you?.holeCards && state.street === "DONE" && (
           <div className="hstack" style={{ gap: 6 }}>
             <span className="small">Show hand?</span>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
-              {formatCard(you.holeCards![0])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing0 ? (myCardShowing1 ? { kind: "SHOW_1", cardIndex: 1 } : { kind: "SHOW_0" }) : (myCardShowing1 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 0 }) })}>
+              {myCardShowing0 ? "Hide" : formatCard(you.holeCards![0])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
-              {formatCard(you.holeCards![1])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing1 ? (myCardShowing0 ? { kind: "SHOW_1", cardIndex: 0 } : { kind: "SHOW_0" }) : (myCardShowing0 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 1 }) })}>
+              {myCardShowing1 ? "Hide" : formatCard(you.holeCards![1])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            {myRevealChoice?.kind !== "SHOW_2" && (
+              <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            )}
           </div>
         )}
         {state.settings.homeRules?.allowMidHandReveal &&
-         you?.inHand && !you.folded && !state.showdownChoices[youId] &&
+         you?.inHand && !you.folded &&
          state.street !== "DONE" && state.street !== "SHOWDOWN" && you.holeCards && (
           <div className="hstack" style={{ gap: 6 }}>
             <span className="small" style={{ color: "#ffaa44" }}>Show live:</span>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 0 } })}>
-              {formatCard(you.holeCards![0])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing0 ? (myCardShowing1 ? { kind: "SHOW_1", cardIndex: 1 } : { kind: "SHOW_0" }) : (myCardShowing1 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 0 }) })}>
+              {myCardShowing0 ? "Hide" : formatCard(you.holeCards![0])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: { kind: "SHOW_1", cardIndex: 1 } })}>
-              {formatCard(you.holeCards![1])}
+            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND", choice: myCardShowing1 ? (myCardShowing0 ? { kind: "SHOW_1", cardIndex: 0 } : { kind: "SHOW_0" }) : (myCardShowing0 ? { kind: "SHOW_2" } : { kind: "SHOW_1", cardIndex: 1 }) })}>
+              {myCardShowing1 ? "Hide" : formatCard(you.holeCards![1])}
             </button>
-            <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            {myRevealChoice?.kind !== "SHOW_2" && (
+              <button className="secondary" onClick={() => send({ type: "REVEAL_HAND" })}>Both</button>
+            )}
           </div>
         )}
         <label className="hstack" style={{ gap: 6, cursor: state.street === "DONE" ? "pointer" : "default" }}>
@@ -1269,15 +1437,33 @@ export default function App() {
           isDealer ? (
             <div className="actionBar">
               <button onClick={() => send({ type: "START_HAND" })}>Start hand</button>
+              <button className="secondary" onClick={() => send({ type: "CUT_FOR_DEALER" })}
+                title="Deal one face-up card to each player; highest card wins the button">
+                {state.highCardRound ? "Redraw (High Card)" : "High Card for Dealer"}
+              </button>
             </div>
           ) : (
             <div className="waitingBanner">Waiting for dealer to start the next hand...</div>
           )
         )}
 
+        {/* Clock countdown banner */}
+        {state.clockEndsAt && (
+          <div className="clockBanner">
+            {(() => {
+              const secsLeft = Math.max(0, Math.ceil((state.clockEndsAt - clockNow) / 1000));
+              return <>⏱ Clock running — <b>{currentTurnPlayer?.name}</b> has <b className={secsLeft <= 10 ? "clockUrgent" : ""}>{secsLeft}s</b> to act</>;
+            })()}
+          </div>
+        )}
+
         {inActiveHand && (
           canAct ? (
             <div className="actionBar">
+              {state.clockEndsAt && (() => {
+                const secsLeft = Math.max(0, Math.ceil((state.clockEndsAt - clockNow) / 1000));
+                return <span className={`pill ${secsLeft <= 10 ? "clockUrgent" : ""}`}>⏱ {secsLeft}s</span>;
+              })()}
               <BettingPanel
                 enabled={true}
                 streetBet={state.streetBet}
@@ -1292,15 +1478,28 @@ export default function App() {
           ) : (
             <div className="waitingBanner">
               Waiting for <span className="waitingName">{currentTurnPlayer?.name ?? "..."}</span>
+              {you?.inHand && !you.folded && !state.clockEndsAt && !state.roundComplete && (
+                <button className="secondary" style={{ marginLeft: 10, fontSize: 12 }}
+                  onClick={() => send({ type: "CALL_CLOCK" })}
+                  title={`Put ${currentTurnPlayer?.name} on a ${state.settings.clockSeconds}s clock`}>
+                  ⏱ Call Clock
+                </button>
+              )}
             </div>
           )
         )}
 
         {inActiveHand && isDealer && (
           <div className="actionBar">
-            <button className="secondary danger" onClick={() => {
-              if (confirm("Void this hand? All bets will be returned.")) send({ type: "NEXT_STREET" });
-            }}>Dealer: Void Hand</button>
+            {state.roundComplete ? (
+              <button onClick={() => send({ type: "NEXT_STREET" })}>
+                Deal {nextStreetLabel(state.street)} ▶
+              </button>
+            ) : (
+              <button className="secondary danger" onClick={() => {
+                if (confirm("Void this hand? All bets will be returned.")) send({ type: "NEXT_STREET" });
+              }}>Dealer: Void Hand</button>
+            )}
           </div>
         )}
 
@@ -1564,6 +1763,11 @@ export default function App() {
       {/* ── Rules summary modal ── */}
       {rulesOpen && (
         <RulesSummary settings={state.settings} onClose={() => setRulesOpen(false)} nowMs={nowMs} />
+      )}
+
+      {/* ── Chip history chart modal ── */}
+      {chartOpen && (
+        <ChipChart history={chipHistory} youId={youId} onClose={() => setChartOpen(false)} />
       )}
 
       {/* ── Welcome back toast ── */}

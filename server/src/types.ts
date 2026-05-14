@@ -25,6 +25,7 @@ export type PlayerState = {
   totalBet: number; // cumulative across all streets in this hand
   holeCards?: [string, string];
   bestHand?: string;
+  outs?: number;
 };
 
 export type BlindLevel = { smallBlind: number; bigBlind: number };
@@ -42,7 +43,8 @@ export type TableSettings = {
   blindPlayersAtStart: number;  // players with chips when level began (bust trigger)
   rebuysEnabled: boolean;
   rebuysOpenUntil: number;      // 0 = closed; >0 = closes at this ms timestamp
-  homeRules: { allowMidHandReveal: boolean };
+  homeRules: { allowMidHandReveal: boolean; showOuts: boolean };
+  clockSeconds: number;         // 0 = clock disabled; >0 = seconds to act when clock is called
 };
 
 export type GameConfigUpdate = {
@@ -51,7 +53,8 @@ export type GameConfigUpdate = {
   blindTriggerMinutes?: number;
   blindTriggerBusts?: number;
   straddleEnabled?: boolean;
-  homeRules?: { allowMidHandReveal: boolean };
+  homeRules?: { allowMidHandReveal: boolean; showOuts?: boolean };
+  clockSeconds?: number;
 };
 
 export type HandPositions = {
@@ -59,6 +62,13 @@ export type HandPositions = {
   sbIndex: number;
   bbIndex: number;
   straddleIndex: number | null;
+};
+
+export type HighCardRound = {
+  cards: Record<string, string>; // playerId → card dealt this round
+  tiedIds: string[];             // players still in contention (empty = resolved)
+  round: number;
+  winnerId?: string;
 };
 
 export type TableState = {
@@ -87,6 +97,10 @@ export type TableState = {
 
   showdownChoices: Record<string, ShowChoice | undefined>;
   stackRequests: Record<string, number>;
+
+  highCardRound?: HighCardRound;
+  clockEndsAt?: number;
+  clockCalledBy?: string;
 
   actionLog: string[];
   dealerMessage?: string;
@@ -120,7 +134,10 @@ export type ClientToServer =
   | { type: "REQUEST_STACK"; amount: number }
   | { type: "CLEAR_STACK_REQUEST"; playerId: string }
   | { type: "SET_BANK"; playerId: string }
-  | { type: "END_SESSION" };
+  | { type: "END_SESSION" }
+  | { type: "CUT_FOR_DEALER" }
+  | { type: "HIGH_CARD_NEXT" }
+  | { type: "CALL_CLOCK" };
 
 export type PlayerProfile = {
   name: string;

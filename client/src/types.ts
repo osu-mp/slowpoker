@@ -27,6 +27,7 @@ export type PlayerState = {
 
   holeCards?: [string, string];
   bestHand?: string;
+  outs?: number;
 };
 
 export type BlindLevel = { smallBlind: number; bigBlind: number };
@@ -44,7 +45,8 @@ export type TableSettings = {
   blindPlayersAtStart: number;
   rebuysEnabled: boolean;
   rebuysOpenUntil: number;
-  homeRules: { allowMidHandReveal: boolean };
+  homeRules: { allowMidHandReveal: boolean; showOuts: boolean };
+  clockSeconds: number;
 };
 
 export type GameConfigUpdate = {
@@ -53,7 +55,15 @@ export type GameConfigUpdate = {
   blindTriggerMinutes?: number;
   blindTriggerBusts?: number;
   straddleEnabled?: boolean;
-  homeRules?: { allowMidHandReveal: boolean };
+  homeRules?: { allowMidHandReveal: boolean; showOuts?: boolean };
+  clockSeconds?: number;
+};
+
+export type HighCardRound = {
+  cards: Record<string, string>;
+  tiedIds: string[];
+  round: number;
+  winnerId?: string;
 };
 
 export type HandPositions = {
@@ -88,6 +98,10 @@ export type TableState = {
 
   showdownChoices: Record<string, ShowChoice | undefined>;
   stackRequests: Record<string, number>;
+
+  highCardRound?: HighCardRound;
+  clockEndsAt?: number;
+  clockCalledBy?: string;
 
   actionLog: string[];
   dealerMessage?: string;
@@ -167,7 +181,10 @@ export type ClientToServer =
   | { type: "REQUEST_STACK"; amount: number }
   | { type: "CLEAR_STACK_REQUEST"; playerId: string }
   | { type: "SET_BANK"; playerId: string }
-  | { type: "END_SESSION" };
+  | { type: "END_SESSION" }
+  | { type: "CUT_FOR_DEALER" }
+  | { type: "HIGH_CARD_NEXT" }
+  | { type: "CALL_CLOCK" };
 
 export type PlayerProfile = {
   name: string;

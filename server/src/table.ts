@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid";
-import type { TableState, PlayerState, Street, ShowChoice, TableSettings, PlayerAction, HandPositions, SidePot, GameConfigUpdate } from "./types.js";
+import type { TableState, PlayerState, Street, ShowChoice, TableSettings, PlayerAction, HandPositions, SidePot, GameConfigUpdate, HighCardRound } from "./types.js";
 import { appendEvent } from "./logger.js";
 import { makeDeck, shuffle } from "./cards.js";
+import { calculateOuts } from "./outs.js";
 import { evaluateBest, findWinners } from "./hand.js";
 
 function nextStreet(s: Street): Street {
@@ -23,6 +24,19 @@ function isAllIn(p: PlayerState) {
   return p.inHand && !p.folded && p.stack === 0;
 }
 
+const RANK_SCORES: Record<string, number> = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'T':10,'J':11,'Q':12,'K':13,'A':14 };
+function cardRank(c: string): number { return RANK_SCORES[c.slice(0, -1)] ?? 0; }
+
+function nextStreetLabel(s: Street): string {
+  switch (s) {
+    case "PREFLOP": return "Flop";
+    case "FLOP": return "Turn";
+    case "TURN": return "River";
+    case "RIVER": return "Showdown";
+    default: return "next street";
+  }
+}
+
 export class Table {
   public state: TableState;
   public ended = false;
@@ -39,7 +53,8 @@ export class Table {
       blindTriggerMinutes: 20, blindTriggerBusts: 1,
       blindLevelIndex: -1, blindLevelStartedAt: now, blindPlayersAtStart: 0,
       rebuysEnabled: false, rebuysOpenUntil: 0,
-      homeRules: { allowMidHandReveal: false },
+      homeRules: { allowMidHandReveal: false, showOuts: false },
+      clockSeconds: 30,
     };
 
     this.state = {
@@ -153,7 +168,8 @@ export class Table {
     if (adminId !== this.state.adminPlayerId) throw new Error("Only the admin can change game config.");
     const s = this.state.settings;
     if (config.straddleEnabled !== undefined) s.straddleEnabled = config.straddleEnabled;
-    if (config.homeRules !== undefined) s.homeRules = config.homeRules;
+    if (config.homeRules !== undefined) s.homeRules = { ...s.homeRules, ...config.homeRules };
+    if (config.clockSeconds !== undefined) s.clockSeconds = Math.max(0, Math.floor(config.clockSeconds));
     if (config.blindTrigger !== undefined) s.blindTrigger = config.blindTrigger;
     if (config.blindTriggerMinutes !== undefined) s.blindTriggerMinutes = Math.max(1, config.blindTriggerMinutes);
     if (config.blindTriggerBusts !== undefined) s.blindTriggerBusts = Math.max(1, config.blindTriggerBusts);
@@ -398,6 +414,18 @@ export class Table {
     }
   }
 
+  private updatePlayerOuts() {
+    const board = this.state.board;
+    const active = board.length === 3 || board.length === 4;
+    for (const p of this.state.players) {
+      if (active && this.state.settings.homeRules.showOuts && p.inHand && !p.folded && p.holeCards) {
+        p.outs = calculateOuts(p.holeCards, board);
+      } else {
+        p.outs = undefined;
+      }
+    }
+  }
+
   private autoEvaluateAndAwardPots() {
     const holeCardMap: Record<string, [string, string]> = {};
     for (const p of this.state.players) {
@@ -577,6 +605,9 @@ export class Table {
     this.state.deck = deck;
     this.state.showdownChoices = {};
     this.state.winningHandName = undefined;
+    this.state.highCardRound = undefined;
+    this.state.clockEndsAt = undefined;
+    this.state.clockCalledBy = undefined;
 
     const sbPlayer = this.state.players[sbIndex];
     const bbPlayer = this.state.players[bbIndex];
@@ -623,6 +654,10 @@ export class Table {
     const p = this.state.players[idx];
     if (!p.inHand || p.folded) throw new Error("You are not in the hand.");
     if (isAllIn(p)) throw new Error("You are all-in.");
+
+    // Clear any running clock — player acted in time
+    this.state.clockEndsAt = undefined;
+    this.state.clockCalledBy = undefined;
 
     const toCall = Math.max(0, this.state.streetBet - p.currentBet);
 
@@ -751,58 +786,54 @@ export class Table {
     }
   }
 
-  /** Deal the next street automatically. Returns true if another auto-advance is needed (all-in runout). */
-  private dealNextStreet(): boolean {
+  /** Deal one street. When it's an all-in runout the round is immediately complete; dealer must call nextStreet() for each remaining street. */
+  private dealNextStreet() {
     const prev = this.state.street;
     const next = nextStreet(prev);
 
     if (next === "FLOP") {
-      if (!this.state.deck || this.state.deck.length < 3) return false;
+      if (!this.state.deck || this.state.deck.length < 3) return;
       this.state.board = [this.state.deck.pop()!, this.state.deck.pop()!, this.state.deck.pop()!];
       this.pushLog(`--- Flop: ${this.state.board.join(" ")} ---`);
       this.state.street = next;
       this.resetForNewStreet();
       this.updateLiveHandRanks();
-      if (!this.state.roundComplete) {
-        this.state.dealerMessage = `Flop dealt. Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
-      }
+      this.updatePlayerOuts();
+      this.state.dealerMessage = this.state.roundComplete
+        ? `Flop dealt — all-in run-out. Dealer: click "Deal ${nextStreetLabel(next)}" to continue.`
+        : `Flop dealt. Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
     } else if (next === "TURN" || next === "RIVER") {
-      if (!this.state.deck || this.state.deck.length < 1) return false;
+      if (!this.state.deck || this.state.deck.length < 1) return;
       const c = this.state.deck.pop()!;
       this.state.board.push(c);
-      this.pushLog(`--- ${next === "TURN" ? "Turn" : "River"}: ${c} ---`);
+      const label = next === "TURN" ? "Turn" : "River";
+      this.pushLog(`--- ${label}: ${c} ---`);
       this.state.street = next;
       this.resetForNewStreet();
       this.updateLiveHandRanks();
-      if (!this.state.roundComplete) {
-        this.state.dealerMessage = `${next === "TURN" ? "Turn" : "River"} dealt. Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
-      }
+      this.updatePlayerOuts();
+      this.state.dealerMessage = this.state.roundComplete
+        ? `${label} dealt — all-in run-out. Dealer: click "Deal ${nextStreetLabel(next)}" to continue.`
+        : `${label} dealt. Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
     } else if (next === "SHOWDOWN") {
       this.state.street = next;
       this.returnUnclaimedChips();
       this.updatePots();
       this.autoEvaluateAndAwardPots();
-      // If auto-eval showed all players (e.g. all-in tie), end hand immediately
-      if (this.allShowdownChoicesMade()) {
-        this.endHand();
-        return false;
-      }
+      if (this.allShowdownChoicesMade()) { this.endHand(); return; }
       this.state.dealerMessage = "Showdown: pots awarded. Choose Show 0/1/2, then dealer ends hand.";
       this.state.roundComplete = true;
     } else {
-      return false;
+      return;
     }
 
     appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: prev, to: next, handNumber: this.state.handNumber, board: this.state.board } });
-
-    // If round is already complete (all-in runout), keep advancing
-    return this.state.roundComplete && this.state.street !== "SHOWDOWN";
   }
 
-  /** Auto-advance through streets when betting is complete (handles all-in runouts too). */
+  /** After betting completes, deal exactly one street. All-in runouts pause here — dealer advances each remaining street manually. */
   private autoAdvance() {
-    while (this.state.roundComplete && this.state.street !== "DONE" && this.state.street !== "SHOWDOWN") {
-      if (!this.dealNextStreet()) break;
+    if (this.state.roundComplete && this.state.street !== "DONE" && this.state.street !== "SHOWDOWN") {
+      this.dealNextStreet();
     }
   }
 
@@ -810,43 +841,45 @@ export class Table {
     this.requireDealer(dealerId);
     if (this.state.street === "DONE") throw new Error("No active hand.");
 
-    // Void hand: dealer force-ends during an active betting street
-    if (this.state.street !== "SHOWDOWN") {
-      // Refund all bets to players
-      for (const p of this.state.players) {
-        if (p.inHand) {
-          p.stack += p.totalBet;
-          p.totalBet = 0;
-          p.currentBet = 0;
-        }
-      }
-      this.state.pot = 0;
-      this.state.pots = [];
-      this.state.street = "DONE";
-      this.state.positions = null;
-      this.state.streetBet = 0;
-      this.state.roundComplete = true;
-      this.state.winningHandName = undefined;
-      this.state.dealerMessage = "Hand voided by dealer. All bets returned.";
-      this.pushLog("--- Hand voided by dealer ---");
-      appendEvent({ ts: Date.now(), type: "HAND_VOIDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
-      return;
-    }
-
     if (this.state.street === "SHOWDOWN") {
-      // Dealer force-advance: SHOWDOWN → DONE
       this.endHand();
       return;
     }
 
-    throw new Error("Streets advance automatically. Dealer only ends the hand from showdown.");
+    // All-in run-out: betting is already complete, advance to the next street
+    if (this.state.roundComplete) {
+      this.dealNextStreet();
+      return;
+    }
+
+    // Active betting round: dealer voids the hand and refunds all bets
+    for (const p of this.state.players) {
+      if (p.inHand) { p.stack += p.totalBet; p.totalBet = 0; p.currentBet = 0; }
+    }
+    this.state.pot = 0;
+    this.state.pots = [];
+    this.state.street = "DONE";
+    this.state.positions = null;
+    this.state.streetBet = 0;
+    this.state.roundComplete = true;
+    this.state.winningHandName = undefined;
+    this.state.clockEndsAt = undefined;
+    this.state.clockCalledBy = undefined;
+    this.state.dealerMessage = "Hand voided by dealer. All bets returned.";
+    this.pushLog("--- Hand voided by dealer ---");
+    appendEvent({ ts: Date.now(), type: "HAND_VOIDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
   }
 
   revealHand(playerId: string, choice: ShowChoice = { kind: "SHOW_2" }) {
     const p = this.playerById(playerId);
     if (!p) throw new Error("No such player.");
+
+    if (choice.kind === "SHOW_0") {
+      delete this.state.showdownChoices[playerId];
+      return;
+    }
+
     if (!p.holeCards) throw new Error("You have no cards to reveal.");
-    if (this.state.showdownChoices[playerId]) throw new Error("Cards already revealed.");
 
     this.state.showdownChoices[playerId] = choice;
     const hole = p.holeCards;
@@ -856,13 +889,17 @@ export class Table {
     if (choice.kind === "SHOW_2") {
       shownCards = [...hole];
       handName = evaluateBest([...hole, ...this.state.board])?.name;
-      const handStr = handName ? ` — ${handName}` : "";
-      this.pushLog(`${p.name} reveals ${hole[0]} ${hole[1]}${handStr}.`);
+      if (this.state.street === "DONE") {
+        const handStr = handName ? ` — ${handName}` : "";
+        this.pushLog(`${p.name} reveals ${hole[0]} ${hole[1]}${handStr}.`);
+      }
     } else if (choice.kind === "SHOW_1") {
       shownCards = [hole[choice.cardIndex]];
       handName = evaluateBest([hole[choice.cardIndex], ...this.state.board])?.name;
-      const handStr = handName ? ` — ${handName}` : "";
-      this.pushLog(`${p.name} reveals ${hole[choice.cardIndex]}${handStr}.`);
+      if (this.state.street === "DONE") {
+        const handStr = handName ? ` — ${handName}` : "";
+        this.pushLog(`${p.name} reveals ${hole[choice.cardIndex]}${handStr}.`);
+      }
     }
 
     appendEvent({ ts: Date.now(), type: "SHOWDOWN_CHOICE", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, choice, voluntary: true, cards: shownCards, handName } });
@@ -917,6 +954,110 @@ export class Table {
       this.pushLog("All players have chosen — hand complete.");
       this.endHand();
     }
+  }
+
+  // ── High-card dealer draw ──────────────────────────────────────────────
+
+  private resolveHighCard(playerIds: string[], cards: Record<string, string>): { winnerId?: string; tiedIds: string[] } {
+    const maxRank = Math.max(...playerIds.map(id => cardRank(cards[id])));
+    const top = playerIds.filter(id => cardRank(cards[id]) === maxRank);
+    return top.length === 1 ? { winnerId: top[0], tiedIds: [] } : { tiedIds: top };
+  }
+
+  cutForDealer(dealerId: string) {
+    this.requireDealer(dealerId);
+    if (this.state.street !== "DONE") throw new Error("Can only draw for dealer between hands.");
+    const eligible = this.state.players.filter(p => p.connected && !p.sittingOut);
+    if (eligible.length < 2) throw new Error("Need at least 2 active players to draw.");
+
+    const deck = shuffle(makeDeck());
+    const cards: Record<string, string> = {};
+    for (const p of eligible) cards[p.id] = deck.pop()!;
+
+    const result = this.resolveHighCard(eligible.map(p => p.id), cards);
+    const round: HighCardRound = { cards, tiedIds: result.tiedIds, round: 1, winnerId: result.winnerId };
+    this.state.highCardRound = round;
+
+    if (result.winnerId) {
+      this.setDealer(result.winnerId);
+      const winner = this.playerById(result.winnerId)!;
+      this.pushLog(`High card: ${winner.name} wins with ${cards[result.winnerId]} — dealer!`);
+    } else {
+      const names = result.tiedIds.map(id => this.playerById(id)?.name).join(", ");
+      this.pushLog(`High card: tie between ${names} — redeal!`);
+    }
+    appendEvent({ ts: Date.now(), type: "HIGH_CARD_DRAW", tableId: this.tableId, sessionId: this.state.sessionId, payload: { cards, round: 1 } });
+  }
+
+  highCardNext(dealerId: string) {
+    this.requireDealer(dealerId);
+    if (!this.state.highCardRound || this.state.highCardRound.tiedIds.length === 0) {
+      throw new Error("No active tie to resolve.");
+    }
+
+    const deck = shuffle(makeDeck());
+    const newCards: Record<string, string> = {};
+    for (const id of this.state.highCardRound.tiedIds) newCards[id] = deck.pop()!;
+
+    const result = this.resolveHighCard(this.state.highCardRound.tiedIds, newCards);
+    const round = this.state.highCardRound.round + 1;
+    this.state.highCardRound = { cards: newCards, tiedIds: result.tiedIds, round, winnerId: result.winnerId };
+
+    if (result.winnerId) {
+      this.setDealer(result.winnerId);
+      const winner = this.playerById(result.winnerId)!;
+      this.pushLog(`Redeal round ${round}: ${winner.name} wins with ${newCards[result.winnerId]} — dealer!`);
+    } else {
+      const names = result.tiedIds.map(id => this.playerById(id)?.name).join(", ");
+      this.pushLog(`Redeal round ${round}: still tied (${names}) — redeal!`);
+    }
+    appendEvent({ ts: Date.now(), type: "HIGH_CARD_DRAW", tableId: this.tableId, sessionId: this.state.sessionId, payload: { cards: newCards, round } });
+  }
+
+  // ── Call clock ─────────────────────────────────────────────────────────
+
+  callClock(callerId: string) {
+    if (this.state.street === "DONE" || this.state.street === "SHOWDOWN") throw new Error("No active betting round.");
+    if (this.state.roundComplete) throw new Error("No active player to put on the clock.");
+    const caller = this.playerById(callerId);
+    if (!caller?.inHand || caller.folded) throw new Error("Only non-folded players in the hand can call the clock.");
+    const target = this.state.players[this.state.currentTurnIndex];
+    if (!target) throw new Error("No active player.");
+    if (target.id === callerId) throw new Error("Cannot call the clock on yourself.");
+    if (this.state.clockEndsAt) throw new Error("Clock is already running.");
+    const seconds = this.state.settings.clockSeconds;
+    if (!seconds) throw new Error("Clock is disabled (0 seconds configured).");
+    this.state.clockEndsAt = Date.now() + seconds * 1000;
+    this.state.clockCalledBy = callerId;
+    this.pushLog(`⏱ Clock called on ${target.name} — ${seconds} seconds to act.`);
+    appendEvent({ ts: Date.now(), type: "CLOCK_CALLED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { callerId, targetId: target.id, seconds } });
+  }
+
+  /** Called by index.ts polling. Returns true if it fired and state changed. */
+  expireClock(): boolean {
+    if (!this.state.clockEndsAt || Date.now() < this.state.clockEndsAt) return false;
+    this.state.clockEndsAt = undefined;
+    this.state.clockCalledBy = undefined;
+    if (this.state.street === "DONE" || this.state.street === "SHOWDOWN") return false;
+    const target = this.state.players[this.state.currentTurnIndex];
+    if (!target?.inHand || target.folded) return false;
+
+    this.pushLog(`⏱ ${target.name} ran out of time — auto-folded.`);
+    target.folded = true;
+    this.pendingActors.delete(target.id);
+    appendEvent({ ts: Date.now(), type: "ACTION", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: target.id, street: this.state.street, action: { kind: "FOLD" }, clockExpired: true } });
+
+    this.updatePots();
+    if (this.maybeEndHandByFolds()) return true;
+    this.updateRoundComplete();
+    if (this.state.roundComplete) {
+      this.autoAdvance();
+    } else {
+      const n = this.state.players.length;
+      this.state.currentTurnIndex = this.nextToActFrom(mod(this.state.currentTurnIndex + 1, n));
+      this.state.dealerMessage = `Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
+    }
+    return true;
   }
 
   endSession(dealerId: string) {

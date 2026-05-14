@@ -65,23 +65,21 @@ function getOrCreateTable(tableId: string) {
 }
 
 function redactState(state: TableState, youId: string): TableState {
-  const isShowdown = state.street === "SHOWDOWN";
   return {
     ...state,
     deck: undefined,
     players: state.players.map((p) => {
       if (p.id === youId) return { ...p };
 
-      // Reveal cards if player has chosen to show (any street, including voluntary reveals)
       const choice = state.showdownChoices[p.id];
       if (choice?.kind === "SHOW_2") {
-        return { ...p }; // full holeCards + bestHand
+        return { ...p };
       }
-      if (isShowdown && choice?.kind === "SHOW_1" && p.holeCards) {
+      if (choice?.kind === "SHOW_1" && p.holeCards) {
         return { ...p, holeCards: p.holeCards, bestHand: undefined };
       }
 
-      return { ...p, holeCards: undefined, bestHand: undefined };
+      return { ...p, holeCards: undefined, bestHand: undefined, outs: undefined };
     })
   };
 }
@@ -213,6 +211,9 @@ wss.on("connection", (ws) => {
           }
           break;
         }
+        case "CUT_FOR_DEALER": table.cutForDealer(current.playerId); break;
+        case "HIGH_CARD_NEXT": table.highCardNext(current.playerId); break;
+        case "CALL_CLOCK": table.callClock(current.playerId); break;
         case "SIT_OUT": table.setSitOut(current.playerId, true); break;
         case "SIT_IN": table.setSitOut(current.playerId, false); break;
         case "REQUEST_STACK": table.requestStack(current.playerId, msg.amount); break;
@@ -247,6 +248,15 @@ wss.on("connection", (ws) => {
     conns.delete(current);
   });
 });
+
+// Clock expiry — check every 500 ms, auto-fold any player whose clock ran out
+setInterval(() => {
+  for (const [tableId, table] of tables) {
+    if (table.state.clockEndsAt && Date.now() >= table.state.clockEndsAt) {
+      if (table.expireClock()) broadcastState(tableId, table);
+    }
+  }
+}, 500);
 
 // Idle table cleanup — remove tables with no connected players and no activity for 30 min
 setInterval(() => {

@@ -62,6 +62,13 @@ input[type="range"] { padding: 0; height: 28px; }
   border: 1px solid rgba(255,255,255,0.15);
   font-size: 12px;
 }
+.pill.outs-badge {
+  background: rgba(180, 110, 0, 0.35);
+  border-color: rgba(255, 180, 50, 0.45);
+  color: #ffc85a;
+  font-size: 11px;
+  padding: 2px 8px;
+}
 .table {
   max-width: 1280px;
   margin: 0 auto;
@@ -159,6 +166,8 @@ input[type="range"] { padding: 0; height: 28px; }
 }
 .playingCard.red { color: #e74c3c; }
 .playingCard.white { color: #f0f0f0; }
+.playingCard.blue { color: #60a5fa; }
+.playingCard.green { color: #4ade80; }
 .playingCard .rank {
   font-size: 17px;
   font-weight: 700;
@@ -221,6 +230,44 @@ input[type="range"] { padding: 0; height: 28px; }
   position: relative;
   width: 100%;
   min-height: 520px;
+  margin-bottom: 90px;
+}
+
+/* Poker table oval — felt + rail rendered as pseudo-element so no JSX needed */
+.tableRing::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  height: 320px;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 36%, rgba(255,255,255,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at center, #247a3e 0%, #165c2c 50%, #0d3e1d 100%);
+  border: 14px solid #6b3d1c;
+  box-shadow:
+    inset 0 0 0 5px rgba(255,255,255,0.07),
+    inset 0 0 70px rgba(0,0,0,0.45),
+    0 10px 40px rgba(0,0,0,0.7);
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Faint spade watermark on the felt */
+.tableRing::after {
+  content: "♠";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 200px;
+  line-height: 1;
+  color: rgba(0,0,0,0.1);
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
 }
 .ringCenter {
   position: absolute;
@@ -241,7 +288,8 @@ input[type="range"] { padding: 0; height: 28px; }
   padding: 10px;
   border-radius: 14px;
   border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(0,0,0,0.20);
+  background: rgba(6,16,11,0.82);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
   transition: opacity 0.3s, box-shadow 0.3s;
   z-index: 2;
   box-sizing: border-box;
@@ -383,6 +431,23 @@ input[type="range"] { padding: 0; height: 28px; }
   font-weight: 700;
   color: #ffd700;
 }
+.clockBanner {
+  text-align: center;
+  padding: 8px 16px;
+  border-radius: 16px;
+  background: rgba(220, 60, 60, 0.18);
+  border: 1px solid rgba(220, 60, 60, 0.45);
+  font-size: 14px;
+  animation: clockPulse 1s ease-in-out infinite alternate;
+}
+@keyframes clockPulse {
+  from { border-color: rgba(220, 60, 60, 0.3); background: rgba(220, 60, 60, 0.12); }
+  to   { border-color: rgba(220, 60, 60, 0.7); background: rgba(220, 60, 60, 0.26); }
+}
+.clockUrgent {
+  color: #ff4444;
+  animation: clockPulse 0.4s ease-in-out infinite alternate;
+}
 .betPresets {
   display: flex;
   gap: 6px;
@@ -455,6 +520,17 @@ input[type="range"] { padding: 0; height: 28px; }
   padding: 24px;
   max-width: 420px;
   width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  color: #e8e8e8;
+}
+
+/* ── Generic modal (chip chart, etc.) ── */
+.modal {
+  background: #1a2a22;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 20px;
+  padding: 24px;
   max-height: 85vh;
   overflow-y: auto;
   color: #e8e8e8;
@@ -681,7 +757,9 @@ body.reconnecting::after {
 /* ── Responsive ── */
 @media (max-width: 700px) {
   .tableTop { flex-direction: column; align-items: flex-start; }
-  .tableRing { min-height: auto; display: flex; flex-direction: column; gap: 10px; }
+  .tableRing { min-height: auto; margin-bottom: 0; display: flex; flex-direction: column; gap: 10px; }
+  .tableRing::before { display: none; }
+  .tableRing::after { display: none; }
   .ringCenter { position: static; transform: none; width: 100%; max-width: 100%; }
   .seat { position: static !important; transform: none !important; width: 100% !important; max-width: 100% !important; }
   .actionBar { flex-direction: column; align-items: stretch; }
