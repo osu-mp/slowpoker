@@ -525,6 +525,23 @@ input[type="range"] { padding: 0; height: 28px; }
   color: #e8e8e8;
 }
 
+/* ── ··· menu ── */
+.menuList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+}
+.menuList > button {
+  width: 100%;
+  text-align: left;
+}
+.menuDivider {
+  height: 1px;
+  background: rgba(255,255,255,0.12);
+  margin: 4px 0;
+}
+
 /* ── Generic modal (chip chart, etc.) ── */
 .modal {
   background: #1a2a22;

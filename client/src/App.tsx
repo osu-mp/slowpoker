@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary, PlayerProfile, TableSettings, GameConfigUpdate, BlindLevel } from "./types";
@@ -611,10 +611,10 @@ export default function App() {
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("sp-soundEnabled") !== "false");
-  const [blindsOpen, setBlindsOpen] = useState(false);
-  const toggleBlinds = useCallback(() => setBlindsOpen(o => !o), []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const toggleSettings = useCallback(() => setSettingsOpen(o => !o), []);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const toggleMenu = useCallback(() => setMenuOpen(o => !o), []);
   const [autoShowPref, setAutoShowPref] = useState<"ask" | "muck" | "show">(
     () => (localStorage.getItem("sp-autoShow") as "ask" | "muck" | "show") ?? "ask"
   );
@@ -669,8 +669,6 @@ export default function App() {
   }, [state?.street, state?.handNumber]);
 
   const you = useMemo(() => state?.players.find(p => p.id === youId) ?? null, [state, youId]);
-  const dealer = useMemo(() => state?.players.find(p => p.isDealer) ?? null, [state]);
-  const bank = useMemo(() => state?.players.find(p => p.id === state.bankPlayerId) ?? null, [state]);
   const currentTurnPlayer = useMemo(() => state ? state.players[state.currentTurnIndex] : null, [state]);
   const yourEmoji = you?.emoji ?? playerEmoji(state?.players.findIndex(p => p.id === youId) ?? 0);
 
@@ -970,7 +968,7 @@ export default function App() {
         <div>
           <div className="title">Slow Poker {isAdmin ? "👑" : ""}</div>
           <div className="small">
-            Session: {state.sessionId} • Hand #{state.handNumber} • {streetLabel(state.street)}
+            Hand #{state.handNumber} • {streetLabel(state.street)} • Blinds {sb}/{bb}
           </div>
           {(() => {
             const s = state.settings;
@@ -1010,33 +1008,32 @@ export default function App() {
               isBank={isBank}
             />
           </Popover>
-          <span className="pill">Dealer: <b>{dealer?.name ?? "—"}</b></span>
-          <span className="pill">Bank: <b>{bank?.name ?? "—"}</b></span>
-          <button className="secondary" onClick={() => setRulesOpen(true)}>Rules</button>
-          {isAdmin && <button className="secondary" onClick={() => setAdminConfigOpen(true)}>⚙ Config</button>}
-          <button className="secondary" onClick={() => fetchHandHistory()} disabled={handHistoryLoading}>
-            {handHistoryLoading ? "Loading..." : "Hand History"}
-          </button>
-          <button className="secondary" onClick={() => setChartOpen(true)} title="Chip history chart">📊</button>
-          <button className="secondary" onClick={() => {
-            const next = !soundEnabled;
-            setSoundEnabled(next);
-            localStorage.setItem("sp-soundEnabled", String(next));
-          }} title={soundEnabled ? "Mute sounds" : "Unmute sounds"}>
-            {soundEnabled ? "\uD83D\uDD0A" : "\uD83D\uDD07"}
-          </button>
-          {isBank && (
-            <Popover
-              trigger={<button className="secondary">Blinds {sb}/{bb} &#x2699;</button>}
-              open={blindsOpen}
-              onToggle={toggleBlinds}
-            >
-              <BankControls
-                settings={state.settings}
-                onApply={(sb2, bb2, str) => { send({ type: "SET_BLINDS", smallBlind: sb2, bigBlind: bb2, straddleEnabled: str }); setBlindsOpen(false); }}
-              />
-            </Popover>
-          )}
+          <Popover
+            trigger={<button className="secondary" title="Menu">···</button>}
+            open={menuOpen}
+            onToggle={toggleMenu}
+          >
+            <div className="menuList">
+              <button className="secondary" onClick={() => { setRulesOpen(true); setMenuOpen(false); }}>Rules</button>
+              <button className="secondary" onClick={() => { fetchHandHistory(); setMenuOpen(false); }} disabled={handHistoryLoading}>
+                {handHistoryLoading ? "Loading..." : "Hand History"}
+              </button>
+              <button className="secondary" onClick={() => { setChartOpen(true); setMenuOpen(false); }}>📊 Chip History</button>
+              <button className="secondary" onClick={() => { const next = !soundEnabled; setSoundEnabled(next); localStorage.setItem("sp-soundEnabled", String(next)); }}>
+                {soundEnabled ? "🔊 Sound On" : "🔇 Sound Off"}
+              </button>
+              {isAdmin && <button className="secondary" onClick={() => { setAdminConfigOpen(true); setMenuOpen(false); }}>⚙ Config</button>}
+              {isBank && (
+                <>
+                  <div className="menuDivider" />
+                  <BankControls
+                    settings={state.settings}
+                    onApply={(sb2, bb2, str) => { send({ type: "SET_BLINDS", smallBlind: sb2, bigBlind: bb2, straddleEnabled: str }); setMenuOpen(false); }}
+                  />
+                </>
+              )}
+            </div>
+          </Popover>
         </div>
       </div>
 
@@ -1147,7 +1144,7 @@ export default function App() {
                 >
                   <CardPill c={c} size="md" />
                 </motion.div>
-              )) : <span className="small">No board cards yet.</span>}
+              )) : null}
             </AnimatePresence>
           </div>
 
@@ -1166,11 +1163,9 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          <div className="boardMeta">
-            Button: <b>{state.positions ? state.players[state.positions.buttonIndex]?.name : "—"}</b> • Blinds: <b>{sb}/{bb}</b>
-            {state.settings.straddleEnabled ? " • Straddle ON" : ""}
-            {" • "}Street bet: <b>{state.streetBet}</b> • Min raise +<b>{state.lastRaiseSize}</b>
-          </div>
+          {state.settings.straddleEnabled && (
+            <div className="boardMeta">Straddle ON</div>
+          )}
 
           <div className="small" style={{ marginTop: 6 }}>
             <b>Turn:</b> {currentTurnPlayer?.name ?? "—"}
@@ -1468,7 +1463,6 @@ export default function App() {
                 enabled={true}
                 streetBet={state.streetBet}
                 toCall={toCall}
-                sb={sb}
                 bb={bb}
                 pot={state.pot}
                 you={you!}
@@ -1847,13 +1841,12 @@ function BettingPanel(props: {
   enabled: boolean;
   streetBet: number;
   toCall: number;
-  sb: number;
   bb: number;
   pot: number;
   you: PlayerState;
   onAct: (a: PlayerAction) => void;
 }) {
-  const { enabled, streetBet, toCall, sb, bb, pot, you, onAct } = props;
+  const { enabled, streetBet, toCall, bb, pot, you, onAct } = props;
   const maxTo = you.currentBet + you.stack;
   const isBet = streetBet === 0;
 
