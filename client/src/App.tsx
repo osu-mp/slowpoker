@@ -2,7 +2,7 @@
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from "framer-motion";
 import { connect, type ConnStatus } from "./ws";
 import type { ServerToClient, TableState, ShowChoice, Street, PlayerState, PlayerAction, HandSummary, PlayerProfile, TableSettings, GameConfigUpdate, BlindLevel } from "./types";
-import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, playStreetTransition } from "./sounds";
+import { playCardDeal, playChipBet, playCheck, playFold, playYourTurn, playWin, playStreetTransition, playClockTick, setSoundVolume } from "./sounds";
 
 type Conn = ReturnType<typeof connect> | null;
 
@@ -19,11 +19,12 @@ const PLAYER_EMOJIS = [
   "\uD83C\uDFB2", "\uD83C\uDFA9", "\uD83D\uDC8E", "\uD83D\uDD25", "\uD83D\uDE80",
 ];
 function playerEmoji(index: number) { return PLAYER_EMOJIS[index % PLAYER_EMOJIS.length]; }
+function displayRank(r: string) { return r === "T" ? "10" : r; }
 function formatCard(c: string) {
   const rank = c.slice(0, -1);
   const suitChar = c.slice(-1);
   const glyph = SUIT_GLYPHS[suitChar] ?? suitChar;
-  return rank + glyph;
+  return displayRank(rank) + glyph;
 }
 
 function streetLabel(s: Street) {
@@ -56,7 +57,7 @@ function CardPill({ c, size = "" }: { c: string; size?: "md" | "lg" | "" }) {
   const colorClass = SUIT_COLOR_CLASS[suitChar] ?? "white";
   return (
     <span className={`playingCard ${colorClass}${size ? " " + size : ""}`}>
-      <span className="rank">{rank}</span>
+      <span className="rank">{displayRank(rank)}</span>
       <span className="suit">{glyph}</span>
     </span>
   );
@@ -148,7 +149,9 @@ function SeatMenu({ player, isBank, isDealer, isAdmin, isSelf, pendingRequest, o
           </button>
         )}
         {isAdmin && !isSelf && (
-          <button className="secondary danger" onClick={() => { onBoot(); setOpen(false); }}>
+          <button className="secondary danger" onClick={() => {
+            if (confirm(`Remove ${player.name} from the table?`)) { onBoot(); setOpen(false); }
+          }}>
             Remove player
           </button>
         )}
@@ -610,7 +613,17 @@ export default function App() {
   const [expandedHand, setExpandedHand] = useState<number | null>(null);
   const [availableSessions, setAvailableSessions] = useState<string[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem("sp-soundEnabled") !== "false");
+  const [soundVolume, setSoundVolumeState] = useState(() => {
+    const stored = localStorage.getItem("sp-soundVolume");
+    // migrate old on/off setting
+    if (stored === null) return localStorage.getItem("sp-soundEnabled") === "false" ? 0 : 80;
+    return Number(stored);
+  });
+  const setSoundVolumePersist = useCallback((v: number) => {
+    setSoundVolumeState(v);
+    setSoundVolume(v);
+    localStorage.setItem("sp-soundVolume", String(v));
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const toggleSettings = useCallback(() => setSettingsOpen(o => !o), []);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -630,12 +643,21 @@ export default function App() {
   const [chartOpen, setChartOpen] = useState(false);
   const [chipHistory, setChipHistory] = useState<ChipSnapshot[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
+  const [autoStartSecs, setAutoStartSecs] = useState(() => Number(localStorage.getItem("sp-autoStart") ?? 0));
+  const [autoStartCountdown, setAutoStartCountdown] = useState<number | null>(null);
+  const autoStartRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [confetti, setConfetti] = useState<{ id: number; x: number; color: string; delay: number }[]>([]);
+  type ClockThrowAnim = { id: number; fromX: number; fromY: number; toX: number; toY: number };
+  const [clockThrow, setClockThrow] = useState<ClockThrowAnim | null>(null);
 
   // Tick for rebuy countdown & blind schedule progress
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 10_000);
     return () => clearInterval(id);
   }, []);
+
+  // Sync initial master volume on mount
+  useEffect(() => { setSoundVolume(soundVolume); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fast tick for clock countdown — only runs while a clock is active
   const [clockNow, setClockNow] = useState(Date.now());
@@ -645,6 +667,16 @@ export default function App() {
     const id = setInterval(() => setClockNow(Date.now()), 500);
     return () => clearInterval(id);
   }, [state?.clockEndsAt]);
+
+  // Clock tick sound — plays every second when clock is running
+  useEffect(() => {
+    if (!state?.clockEndsAt || soundVolume === 0) return;
+    const id = setInterval(() => {
+      const secsLeft = Math.ceil((state.clockEndsAt! - Date.now()) / 1000);
+      if (secsLeft > 0) playClockTick(secsLeft <= 10);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [state?.clockEndsAt, soundVolume]);
 
   // Animation state
   const [chipAnimations, setChipAnimations] = useState<ChipAnim[]>([]);
@@ -686,7 +718,7 @@ export default function App() {
 
     // 1. Hand start → card deal animation + sound
     if (state.handNumber !== prev.handNumber && state.street === "PREFLOP") {
-      if (soundEnabled) playCardDeal();
+      if (soundVolume > 0) playCardDeal();
       const newAnims: DealAnim[] = [];
       seats.forEach((p, seatIdx) => {
         if (p.inHand) {
@@ -712,7 +744,7 @@ export default function App() {
         }
       });
       if (hadBetIncrease) {
-        if (soundEnabled) playChipBet();
+        if (soundVolume > 0) playChipBet();
         setPotPulse(n => n + 1);
       }
     }
@@ -721,18 +753,18 @@ export default function App() {
     if (state.street !== prev.street && ["FLOP", "TURN", "RIVER"].includes(state.street)) {
       setStreetFlash(streetLabel(state.street));
       setTimeout(() => setStreetFlash(null), 1800);
-      if (soundEnabled) playStreetTransition();
+      if (soundVolume > 0) playStreetTransition();
     }
 
     // 4. Win banner → sound
     if (state.winningHandName && !prev.winningHandName) {
-      if (soundEnabled) playWin();
+      if (soundVolume > 0) playWin();
     }
 
     // 5. Check/fold detection from action log
     if (state.actionLog.length > prev.actionLog.length && state.actionLog[0] !== prev.actionLog[0]) {
       const latest = state.actionLog[0]?.toLowerCase() ?? "";
-      if (soundEnabled) {
+      if (soundVolume > 0) {
         if (latest.includes("checks")) playCheck();
         else if (latest.includes("folds")) playFold();
       }
@@ -743,7 +775,7 @@ export default function App() {
     const currTurnId = state.players[state.currentTurnIndex]?.id;
     if (currTurnId === youId && prevTurnId !== youId &&
         state.street !== "DONE" && state.street !== "SHOWDOWN") {
-      if (soundEnabled) playYourTurn();
+      if (soundVolume > 0) playYourTurn();
     }
 
     // 7. Hand ends → highlight winner seats for 3s
@@ -781,7 +813,40 @@ export default function App() {
         }
       }
     }
-  }, [state, youId, soundEnabled]);
+
+    // 10. Clock newly called → throw animation from caller seat to target seat
+    if (!prev.clockEndsAt && state.clockEndsAt && state.clockCalledBy) {
+      const n = seats.length;
+      const callerSeatIdx = seats.findIndex(p => p.id === state.clockCalledBy);
+      const targetSeatIdx = seats.findIndex(p => p.id === state.players[state.currentTurnIndex]?.id);
+      if (callerSeatIdx >= 0 && targetSeatIdx >= 0) {
+        const seatCenter = (idx: number) => {
+          const angle = (Math.PI / 2) - (idx / n) * 2 * Math.PI;
+          return { x: 50 - 44 * Math.cos(angle), y: 50 + 40 * Math.sin(angle) };
+        };
+        const from = seatCenter(callerSeatIdx);
+        const to = seatCenter(targetSeatIdx);
+        const throwId = ++animIdCounter;
+        setClockThrow({ id: throwId, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y });
+        setTimeout(() => setClockThrow(t => t?.id === throwId ? null : t), 900);
+      }
+    }
+
+    // 11. You win a pot → confetti burst
+    if (state.street === "DONE" && prev.street !== "DONE" && youId) {
+      const wonPot = state.pots.some(p => p.winnerIds?.includes(youId));
+      if (wonPot) {
+        const colors = ["#ffd700","#ff4444","#44ff88","#4499ff","#ff88ff","#ff8844"];
+        setConfetti(Array.from({ length: 36 }, (_, i) => ({
+          id: i,
+          x: 30 + Math.random() * 40,
+          color: colors[i % colors.length],
+          delay: Math.random() * 0.4,
+        })));
+        setTimeout(() => setConfetti([]), 3000);
+      }
+    }
+  }, [state, youId, soundVolume]);
 
   // Reconnect border: toggle body class so CSS viewport pulse applies
   useEffect(() => {
@@ -800,6 +865,26 @@ export default function App() {
       !!you?.inHand && !you?.folded;
     document.title = isYourTurn ? "YOUR TURN — Slow Poker" : "Slow Poker";
   }, [state, youId, you]);
+
+  // Auto-start hand countdown for dealer
+  const youIsDealer = !!you?.isDealer;
+  useEffect(() => {
+    if (autoStartRef.current) { clearInterval(autoStartRef.current); autoStartRef.current = null; }
+    setAutoStartCountdown(null);
+    if (!youIsDealer || !state || state.street !== "DONE" || autoStartSecs <= 0) return;
+    setAutoStartCountdown(autoStartSecs);
+    let remaining = autoStartSecs;
+    autoStartRef.current = setInterval(() => {
+      remaining -= 1;
+      setAutoStartCountdown(remaining);
+      if (remaining <= 0) {
+        clearInterval(autoStartRef.current!);
+        autoStartRef.current = null;
+        send({ type: "START_HAND" });
+      }
+    }, 1000);
+    return () => { if (autoStartRef.current) clearInterval(autoStartRef.current); };
+  }, [youIsDealer, state?.street, autoStartSecs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto show/muck preference
   useEffect(() => {
@@ -1019,9 +1104,13 @@ export default function App() {
                 {handHistoryLoading ? "Loading..." : "Hand History"}
               </button>
               <button className="secondary" onClick={() => { setChartOpen(true); setMenuOpen(false); }}>📊 Chip History</button>
-              <button className="secondary" onClick={() => { const next = !soundEnabled; setSoundEnabled(next); localStorage.setItem("sp-soundEnabled", String(next)); }}>
-                {soundEnabled ? "🔊 Sound On" : "🔇 Sound Off"}
-              </button>
+              <div className="menuVolumeRow">
+                <span>{soundVolume === 0 ? "🔇" : soundVolume < 50 ? "🔉" : "🔊"}</span>
+                <input type="range" min={0} max={100} value={soundVolume}
+                  onChange={e => setSoundVolumePersist(Number(e.target.value))}
+                  style={{ flex: 1 }} />
+                <span className="small" style={{ minWidth: 28, textAlign: "right" }}>{soundVolume}</span>
+              </div>
               {isAdmin && <button className="secondary" onClick={() => { setAdminConfigOpen(true); setMenuOpen(false); }}>⚙ Config</button>}
               {isBank && (
                 <>
@@ -1223,7 +1312,40 @@ export default function App() {
               );
             })}
           </AnimatePresence>
+
+          {/* Clock throw — ⏱ flies from caller seat to target seat */}
+          <AnimatePresence>
+            {clockThrow && (
+              <motion.div
+                key={clockThrow.id}
+                style={{ position: "absolute", fontSize: 28, pointerEvents: "none", zIndex: 20,
+                  left: `${clockThrow.fromX}%`, top: `${clockThrow.fromY}%`, transform: "translate(-50%,-50%)" }}
+                animate={{ left: `${clockThrow.toX}%`, top: `${clockThrow.toY}%`, rotate: 720, scale: [1, 1.4, 1] }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ duration: 0.75, ease: "easeInOut" }}
+              >
+                ⏱
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
+
+        {/* Confetti burst when you win */}
+        <AnimatePresence>
+          {confetti.map(p => (
+            <motion.div
+              key={p.id}
+              style={{
+                position: "absolute", left: `${p.x}%`, bottom: "8%",
+                width: 8, height: 8, borderRadius: 2,
+                background: p.color, pointerEvents: "none", zIndex: 30,
+              }}
+              initial={{ y: 0, opacity: 1, rotate: 0 }}
+              animate={{ y: -(120 + Math.random() * 80), opacity: 0, rotate: 360 * (Math.random() > 0.5 ? 1 : -1) }}
+              transition={{ duration: 1.4 + p.delay, delay: p.delay, ease: "easeOut" }}
+            />
+          ))}
+        </AnimatePresence>
 
         {/* Seats around the ellipse */}
         {(() => {
@@ -1431,11 +1553,27 @@ export default function App() {
         {state.street === "DONE" && (
           isDealer ? (
             <div className="actionBar">
-              <button onClick={() => send({ type: "START_HAND" })}>Start hand</button>
+              <button onClick={() => { if (autoStartRef.current) { clearInterval(autoStartRef.current); autoStartRef.current = null; setAutoStartCountdown(null); } send({ type: "START_HAND" }); }}>
+                {autoStartCountdown !== null ? `Starting in ${autoStartCountdown}s… (click to start now)` : "Start hand"}
+              </button>
               <button className="secondary" onClick={() => send({ type: "CUT_FOR_DEALER" })}
                 title="Deal one face-up card to each player; highest card wins the button">
                 {state.highCardRound ? "Redraw (High Card)" : "High Card for Dealer"}
               </button>
+              <div className="autoStartControl">
+                <span className="small">Auto-start:</span>
+                <select value={autoStartSecs} onChange={e => {
+                  const v = Number(e.target.value);
+                  setAutoStartSecs(v);
+                  localStorage.setItem("sp-autoStart", String(v));
+                }} style={{ fontSize: 12, padding: "2px 4px" }}>
+                  <option value={0}>Off</option>
+                  <option value={5}>5s</option>
+                  <option value={10}>10s</option>
+                  <option value={15}>15s</option>
+                  <option value={30}>30s</option>
+                </select>
+              </div>
             </div>
           ) : (
             <div className="waitingBanner">Waiting for dealer to start the next hand...</div>

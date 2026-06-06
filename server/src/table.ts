@@ -160,6 +160,7 @@ export class Table {
       throw new Error("Cannot remove a player who is currently in a hand. Wait for the hand to end.");
     }
     this.state.players.splice(idx, 1);
+    if (this.state.bankPlayerId === targetId) this.state.bankPlayerId = undefined as any;
     this.pushLog(`${p.name} was removed by admin.`);
     appendEvent({ ts: Date.now(), type: "PLAYER_BOOTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId: targetId } });
   }
@@ -587,7 +588,7 @@ export class Table {
     this.state.pot = 0;
     this.state.pots = [];
     for (const p of this.state.players) {
-      p.inHand = p.connected && !p.sittingOut;
+      p.inHand = p.connected && !p.sittingOut && p.stack > 0;
       p.folded = false;
       p.currentBet = 0;
       p.totalBet = 0;
@@ -1029,7 +1030,7 @@ export class Table {
     if (!seconds) throw new Error("Clock is disabled (0 seconds configured).");
     this.state.clockEndsAt = Date.now() + seconds * 1000;
     this.state.clockCalledBy = callerId;
-    this.pushLog(`⏱ Clock called on ${target.name} — ${seconds} seconds to act.`);
+    this.pushLog(`⏱ ${caller.name} called the clock on ${target.name} — ${seconds} seconds to act.`);
     appendEvent({ ts: Date.now(), type: "CLOCK_CALLED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { callerId, targetId: target.id, seconds } });
   }
 

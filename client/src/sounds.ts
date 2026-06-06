@@ -1,11 +1,25 @@
 // Web Audio API sound effects — all synthesized, no external files
 
 let ctx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
 
 function getCtx(): AudioContext {
   if (!ctx) ctx = new AudioContext();
   if (ctx.state === "suspended") ctx.resume();
   return ctx;
+}
+
+function getMaster(): GainNode {
+  const ac = getCtx();
+  if (!masterGain) {
+    masterGain = ac.createGain();
+    masterGain.connect(ac.destination);
+  }
+  return masterGain;
+}
+
+export function setSoundVolume(v: number) { // 0–100
+  getMaster().gain.value = v / 100;
 }
 
 function noiseBuffer(duration: number): AudioBuffer {
@@ -17,7 +31,7 @@ function noiseBuffer(duration: number): AudioBuffer {
   return buf;
 }
 
-/** Card deal — quick snap/flick: short burst of filtered white noise (~40ms) */
+/** Card deal — quick snap/flick */
 export function playCardDeal() {
   const ac = getCtx();
   const src = ac.createBufferSource();
@@ -28,11 +42,11 @@ export function playCardDeal() {
   const gain = ac.createGain();
   gain.gain.setValueAtTime(0.15, ac.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.04);
-  src.connect(filter).connect(gain).connect(ac.destination);
+  src.connect(filter).connect(gain).connect(getMaster());
   src.start();
 }
 
-/** Chip bet/call/raise — two rapid high-freq sine pings (~80ms) */
+/** Chip bet/call/raise — two rapid high-freq sine pings */
 export function playChipBet() {
   const ac = getCtx();
   const now = ac.currentTime;
@@ -43,13 +57,13 @@ export function playChipBet() {
     const gain = ac.createGain();
     gain.gain.setValueAtTime(0.12, now + i * 0.04);
     gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.04 + 0.04);
-    osc.connect(gain).connect(ac.destination);
+    osc.connect(gain).connect(getMaster());
     osc.start(now + i * 0.04);
     osc.stop(now + i * 0.04 + 0.05);
   }
 }
 
-/** Check — soft tap: low-freq noise burst (~30ms) */
+/** Check — soft tap */
 export function playCheck() {
   const ac = getCtx();
   const src = ac.createBufferSource();
@@ -60,11 +74,11 @@ export function playCheck() {
   const gain = ac.createGain();
   gain.gain.setValueAtTime(0.1, ac.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.03);
-  src.connect(filter).connect(gain).connect(ac.destination);
+  src.connect(filter).connect(gain).connect(getMaster());
   src.start();
 }
 
-/** Fold — soft whoosh: filtered noise with downward frequency sweep (~150ms) */
+/** Fold — soft whoosh */
 export function playFold() {
   const ac = getCtx();
   const src = ac.createBufferSource();
@@ -77,15 +91,15 @@ export function playFold() {
   const gain = ac.createGain();
   gain.gain.setValueAtTime(0.1, ac.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.15);
-  src.connect(filter).connect(gain).connect(ac.destination);
+  src.connect(filter).connect(gain).connect(getMaster());
   src.start();
 }
 
-/** Your turn — gentle chime: two-note ascending sine tones (~300ms) */
+/** Your turn — gentle chime: two-note ascending tones */
 export function playYourTurn() {
   const ac = getCtx();
   const now = ac.currentTime;
-  const notes = [660, 880]; // E5 → A5
+  const notes = [660, 880];
   notes.forEach((freq, i) => {
     const osc = ac.createOscillator();
     osc.type = "sine";
@@ -93,17 +107,17 @@ export function playYourTurn() {
     const gain = ac.createGain();
     gain.gain.setValueAtTime(0.1, now + i * 0.15);
     gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.15);
-    osc.connect(gain).connect(ac.destination);
+    osc.connect(gain).connect(getMaster());
     osc.start(now + i * 0.15);
     osc.stop(now + i * 0.15 + 0.2);
   });
 }
 
-/** Win/pot award — pleasant arpeggio: 3-note ascending tones (~400ms) */
+/** Win/pot award — pleasant ascending arpeggio */
 export function playWin() {
   const ac = getCtx();
   const now = ac.currentTime;
-  const notes = [523, 659, 784]; // C5 → E5 → G5
+  const notes = [523, 659, 784];
   notes.forEach((freq, i) => {
     const osc = ac.createOscillator();
     osc.type = "sine";
@@ -111,13 +125,13 @@ export function playWin() {
     const gain = ac.createGain();
     gain.gain.setValueAtTime(0.12, now + i * 0.12);
     gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.2);
-    osc.connect(gain).connect(ac.destination);
+    osc.connect(gain).connect(getMaster());
     osc.start(now + i * 0.12);
     osc.stop(now + i * 0.12 + 0.25);
   });
 }
 
-/** Street transition — subtle sweep: rising filtered noise (~200ms) */
+/** Street transition — subtle rising sweep */
 export function playStreetTransition() {
   const ac = getCtx();
   const src = ac.createBufferSource();
@@ -130,6 +144,22 @@ export function playStreetTransition() {
   const gain = ac.createGain();
   gain.gain.setValueAtTime(0.08, ac.currentTime);
   gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.2);
-  src.connect(filter).connect(gain).connect(ac.destination);
+  src.connect(filter).connect(gain).connect(getMaster());
   src.start();
+}
+
+/** Clock tick — sharp metronome click (plays once per second when on the clock) */
+export function playClockTick(urgent = false) {
+  const ac = getCtx();
+  const now = ac.currentTime;
+  // A short transient: quick sine burst at a high frequency
+  const osc = ac.createOscillator();
+  osc.type = "sine";
+  osc.frequency.value = urgent ? 1200 : 900;
+  const gain = ac.createGain();
+  gain.gain.setValueAtTime(urgent ? 0.18 : 0.1, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+  osc.connect(gain).connect(getMaster());
+  osc.start(now);
+  osc.stop(now + 0.07);
 }
