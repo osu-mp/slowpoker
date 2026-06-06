@@ -980,9 +980,11 @@ export class Table {
     this.state.highCardRound = round;
 
     if (result.winnerId) {
-      this.setDealer(result.winnerId);
+      const winnerIdx = this.state.players.findIndex(p => p.id === result.winnerId);
+      this.lastButtonIndex = mod(winnerIdx - 1, this.state.players.length);
       const winner = this.playerById(result.winnerId)!;
-      this.pushLog(`High card: ${winner.name} wins with ${cards[result.winnerId]} — dealer!`);
+      this.pushLog(`High card: ${winner.name} wins with ${cards[result.winnerId]} — they have the button!`);
+      this.state.dealerMessage = `${winner.name} won the high card — button starts with them. Dealer: start the hand when ready.`;
     } else {
       const names = result.tiedIds.map(id => this.playerById(id)?.name).join(", ");
       this.pushLog(`High card: tie between ${names} — redeal!`);
@@ -1005,9 +1007,11 @@ export class Table {
     this.state.highCardRound = { cards: newCards, tiedIds: result.tiedIds, round, winnerId: result.winnerId };
 
     if (result.winnerId) {
-      this.setDealer(result.winnerId);
+      const winnerIdx = this.state.players.findIndex(p => p.id === result.winnerId);
+      this.lastButtonIndex = mod(winnerIdx - 1, this.state.players.length);
       const winner = this.playerById(result.winnerId)!;
-      this.pushLog(`Redeal round ${round}: ${winner.name} wins with ${newCards[result.winnerId]} — dealer!`);
+      this.pushLog(`Redeal round ${round}: ${winner.name} wins with ${newCards[result.winnerId]} — they have the button!`);
+      this.state.dealerMessage = `${winner.name} won the high card — button starts with them. Dealer: start the hand when ready.`;
     } else {
       const names = result.tiedIds.map(id => this.playerById(id)?.name).join(", ");
       this.pushLog(`Redeal round ${round}: still tied (${names}) — redeal!`);

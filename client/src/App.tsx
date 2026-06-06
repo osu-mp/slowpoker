@@ -254,21 +254,76 @@ function SeatCards({ p, choice, isYou, handNumber, showOuts }: {
   );
 }
 
-function ChipStack({ stack, maxStack }: { stack: number; maxStack: number }) {
-  if (stack <= 0 || maxStack <= 0) return null;
-  const ratio = Math.min(1, stack / maxStack);
-  const count = Math.max(1, Math.round(ratio * 8));
-  const color = ratio > 0.5
-    ? { bg: "linear-gradient(to right, #1e8449 30%, #27ae60 50%, #1e8449 70%)", shadow: "0 2px 0 #145a32, inset 0 1px 0 rgba(255,255,255,0.3)" }
-    : ratio > 0.25
-    ? { bg: "linear-gradient(to right, #d68910 30%, #f39c12 50%, #d68910 70%)", shadow: "0 2px 0 #7d6608, inset 0 1px 0 rgba(255,255,255,0.3)" }
-    : { bg: "linear-gradient(to right, #922b21 30%, #c0392b 50%, #922b21 70%)", shadow: "0 2px 0 #641e16, inset 0 1px 0 rgba(255,255,255,0.3)" };
+const DENOMS = [500, 100, 25, 5, 1] as const;
+const DENOM_COLOR: Record<number, string> = {
+  500: "#9b59b6", 100: "#2c2c2c", 25: "#27ae60", 5: "#e74c3c", 1: "#d5d8dc",
+};
+const DENOM_BORDER: Record<number, string> = {
+  500: "#7d3c98", 100: "#111", 25: "#1e8449", 5: "#c0392b", 1: "#aab7b8",
+};
+type ChipGroup = { denom: number; count: number };
+
+function chipBreakdown(amount: number): ChipGroup[] {
+  let remaining = Math.max(0, Math.floor(amount));
+  const result: ChipGroup[] = [];
+  for (const d of DENOMS) {
+    const count = Math.floor(remaining / d);
+    if (count > 0) result.push({ denom: d, count });
+    remaining %= d;
+  }
+  return result;
+}
+
+type ChipSize = "sm" | "md" | "lg";
+const CHIP_W: Record<ChipSize, number> = { sm: 16, md: 20, lg: 26 };
+const CHIP_H: Record<ChipSize, number> = { sm: 5, md: 7, lg: 9 };
+const CHIP_OFF: Record<ChipSize, number> = { sm: 4, md: 5, lg: 6 };
+
+function ChipStack({ amount, size = "sm", maxCols = 8 }: {
+  amount: number;
+  size?: ChipSize;
+  maxCols?: number;
+}) {
+  if (amount <= 0) return null;
+  const groups = chipBreakdown(amount);
+  if (groups.length === 0) return null;
+
+  const w = CHIP_W[size];
+  const h = CHIP_H[size];
+  const off = CHIP_OFF[size];
+
+  const columns: { denom: number; count: number }[] = [];
+  for (const { denom, count } of groups) {
+    for (let c = 0; c < Math.ceil(count / 10); c++) {
+      columns.push({ denom, count: Math.min(10, count - c * 10) });
+    }
+  }
+  const cols = columns.slice(0, maxCols);
 
   return (
-    <div className="chipStackViz" title={`${stack} chips`}>
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="chipDisc" style={{ background: color.bg, boxShadow: color.shadow }} />
-      ))}
+    <div style={{ display: "flex", gap: 3, alignItems: "flex-end" }} title={String(amount)}>
+      {cols.map((col, ci) => {
+        const colH = h + (col.count - 1) * off;
+        return (
+          <div key={ci} style={{ position: "relative", width: w, height: colH, flexShrink: 0 }}>
+            {Array.from({ length: col.count }, (_, i) => (
+              <div
+                key={i}
+                style={{
+                  position: "absolute",
+                  bottom: i * off,
+                  width: w,
+                  height: h,
+                  borderRadius: "50%",
+                  background: DENOM_COLOR[col.denom],
+                  border: `1.5px solid ${DENOM_BORDER[col.denom]}`,
+                  boxShadow: `0 2px 0 ${DENOM_BORDER[col.denom]}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                }}
+              />
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1186,6 +1241,11 @@ export default function App() {
           >
             Pot: <AnimatedNumber value={state.pot} />
           </motion.div>
+          {state.pot > 0 && (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 4 }}>
+              <ChipStack amount={state.pot} size="md" />
+            </div>
+          )}
 
           {(() => {
             const hasAllIn = state.players.some(p => p.inHand && !p.folded && p.stack === 0);
@@ -1274,16 +1334,15 @@ export default function App() {
               return (
                 <motion.div
                   key={chip.id}
-                  className="flyingChip"
+                  className="flyingChipCluster"
                   initial={{ left: startLeft, top: startTop, scale: 1, opacity: 1 }}
-                  animate={{ left: "50%", top: "50%", scale: 0.6, opacity: 0.8 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 200, damping: 22, duration: 0.5 }}
+                  animate={{ left: "50%", top: "50%", scale: 0.7, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 180, damping: 22 }}
                   onAnimationComplete={() =>
                     setChipAnimations(a => a.filter(c => c.id !== chip.id))
                   }
                 >
-                  {chip.amount}
+                  <ChipStack amount={chip.amount} size="sm" />
                 </motion.div>
               );
             })}
@@ -1349,7 +1408,6 @@ export default function App() {
 
         {/* Seats around the ellipse */}
         {(() => {
-          const maxStack = Math.max(...state.players.map(p => p.stack), 1);
           return seatPlayers.map((p, i) => {
           const isTurn = p.id === state.players[state.currentTurnIndex]?.id && inActiveHand;
           const isFolded = p.inHand && p.folded;
@@ -1424,9 +1482,6 @@ export default function App() {
                       {state.highCardRound.tiedIds.includes(p.id) && <span style={{ fontSize: 11, marginLeft: 3 }}>🔄</span>}
                     </div>
                   )}
-                  {p.inHand && !p.folded && (
-                    <ChipStack stack={p.stack} maxStack={maxStack} />
-                  )}
                 </div>
                 {/* Showdown waiting label */}
                 {state.street === "SHOWDOWN" && p.inHand && !p.folded &&
@@ -1452,6 +1507,11 @@ export default function App() {
                   {inActiveHand && <>{" "}• Bet: <b>{p.currentBet}</b></>}
                   {" "}• {p.inHand ? (p.folded ? "Folded" : "In hand") : "Out"}
                 </div>
+                {p.stack > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <ChipStack amount={p.stack} size="sm" />
+                  </div>
+                )}
               </div>
 
               {/* Fold card-back ghost */}
@@ -1557,9 +1617,15 @@ export default function App() {
                 {autoStartCountdown !== null ? `Starting in ${autoStartCountdown}s… (click to start now)` : "Start hand"}
               </button>
               <button className="secondary" onClick={() => send({ type: "CUT_FOR_DEALER" })}
-                title="Deal one face-up card to each player; highest card wins the button">
-                {state.highCardRound ? "Redraw (High Card)" : "High Card for Dealer"}
+                title="Deal one face-up card to each player; highest card gets the button">
+                {state.highCardRound && state.highCardRound.tiedIds.length > 0 ? "Redraw (tied)" : "High Card → Button"}
               </button>
+              {isAdmin && state.highCardRound?.winnerId && (
+                <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: state.highCardRound!.winnerId! })}
+                  title="Also make the high-card winner the dealer (game host)">
+                  Make Dealer
+                </button>
+              )}
               <div className="autoStartControl">
                 <span className="small">Auto-start:</span>
                 <select value={autoStartSecs} onChange={e => {
@@ -1636,17 +1702,19 @@ export default function App() {
         )}
 
         {state.street === "SHOWDOWN" && (
-          <div className="actionBar">
-            {!state.showdownChoices[youId] && (
-              <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} holeCards={you?.holeCards} />
-            )}
-            {state.showdownChoices[youId] && (
-              <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
-            )}
+          <>
+            <div className="actionBar">
+              {!state.showdownChoices[youId] && (
+                <ShowdownPanel onPick={(choice) => send({ type: "SHOWDOWN_CHOICE", choice })} holeCards={you?.holeCards} />
+              )}
+              {state.showdownChoices[youId] && (
+                <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
+              )}
+            </div>
             {isDealer && (() => {
               const pendingChoices = state.players.filter(p => p.inHand && !p.folded && !state.showdownChoices[p.id]).length;
               return (
-                <>
+                <div className="actionBar">
                   <button onClick={() => {
                     if (pendingChoices > 0 && !confirm(`${pendingChoices} player${pendingChoices > 1 ? "s have" : " has"} not chosen yet. End hand anyway?`)) return;
                     send({ type: "NEXT_STREET" });
@@ -1654,10 +1722,10 @@ export default function App() {
                   <button className="secondary" onClick={() => {
                     if (confirm("End the session? All players will see the recap.")) send({ type: "END_SESSION" });
                   }}>End session</button>
-                </>
+                </div>
               );
             })()}
-          </div>
+          </>
         )}
       </div>
 
