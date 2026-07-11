@@ -44,6 +44,16 @@ export class Table {
   private pendingActors = new Set<string>();
   private lastButtonIndex = -1;
 
+  // Telemetry (admin-toggled, default off)
+  private telemetryDecisionMs = false;
+  private turnStartedAt = 0;
+  private handStartedAt = 0;
+  private handTotalPot = 0;
+  private streetPlayerCounts: Partial<Record<string, number>> = {};
+  private wentToShowdown = false;
+
+  get telemetryConfig() { return { decisionMs: this.telemetryDecisionMs }; }
+
   constructor(public tableId: string) {
     const sessionId = nanoid(10);
     const now = Date.now();
@@ -282,6 +292,11 @@ export class Table {
     this.state.bankPlayerId = playerId;
     this.pushLog(`Bank reassigned to ${p.name} (admin).`);
     appendEvent({ ts: Date.now(), type: "BANK_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId } });
+  }
+
+  adminSetTelemetry(opts: { decisionMs: boolean }) {
+    this.telemetryDecisionMs = opts.decisionMs;
+    appendEvent({ ts: Date.now(), type: "TELEMETRY_CONFIG", tableId: this.tableId, sessionId: this.state.sessionId, payload: opts });
   }
 
   setStack(bankId: string, targetPlayerId: string, stack: number) {
@@ -556,6 +571,7 @@ export class Table {
       this.updatePots();
       const winner = alive[0];
       const totalWon = this.state.pot;
+      this.handTotalPot = totalWon;
       winner.stack += totalWon;
       this.pushLog(`${winner.name} wins ${totalWon} (everyone folded).`);
       appendEvent({ ts: Date.now(), type: "HAND_WON_UNCONTESTED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber, winnerId: winner.id, amount: totalWon } });
@@ -635,6 +651,12 @@ export class Table {
     const start = straddleIndex !== null ? mod(straddleIndex + 1, n) : mod(bbIndex + 1, n);
     this.state.currentTurnIndex = this.nextToActFrom(start);
 
+    this.handStartedAt = Date.now();
+    this.handTotalPot = 0;
+    this.wentToShowdown = false;
+    this.streetPlayerCounts = { PREFLOP: this.state.players.filter(p => p.inHand).length };
+    this.turnStartedAt = Date.now();
+
     this.updateLiveHandRanks();
 
     const buttonName = this.state.players[buttonIndex].name;
@@ -660,11 +682,14 @@ export class Table {
     this.state.clockEndsAt = undefined;
     this.state.clockCalledBy = undefined;
 
+    const actedAt = Date.now();
     const toCall = Math.max(0, this.state.streetBet - p.currentBet);
 
     const logAct = (line: string, extra?: any) => {
       this.pushLog(line);
-      appendEvent({ ts: Date.now(), type: "ACTION", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, street: this.state.street, action, ...extra, ...(p.stack === 0 ? { allIn: true } : {}) } });
+      const decisionPayload = this.telemetryDecisionMs && this.turnStartedAt > 0
+        ? { decisionMs: actedAt - this.turnStartedAt } : {};
+      appendEvent({ ts: actedAt, type: "ACTION", tableId: this.tableId, sessionId: this.state.sessionId, payload: { playerId, street: this.state.street, action, ...extra, ...decisionPayload, ...(p.stack === 0 ? { allIn: true } : {}) } });
     };
 
     const advanceOrComplete = () => {
@@ -678,6 +703,7 @@ export class Table {
         return;
       }
       this.state.currentTurnIndex = this.nextToActFrom(mod(this.state.currentTurnIndex + 1, n));
+      this.turnStartedAt = Date.now();
       this.state.dealerMessage = `Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
     };
 
@@ -784,6 +810,8 @@ export class Table {
     if (this.pendingActors.size <= 1) {
       this.state.roundComplete = true;
       this.pendingActors.clear();
+    } else {
+      this.turnStartedAt = Date.now();
     }
   }
 
@@ -797,6 +825,7 @@ export class Table {
       this.state.board = [this.state.deck.pop()!, this.state.deck.pop()!, this.state.deck.pop()!];
       this.pushLog(`--- Flop: ${this.state.board.join(" ")} ---`);
       this.state.street = next;
+      this.streetPlayerCounts[next] = this.state.players.filter(p => p.inHand && !p.folded).length;
       this.resetForNewStreet();
       this.updateLiveHandRanks();
       this.updatePlayerOuts();
@@ -810,6 +839,7 @@ export class Table {
       const label = next === "TURN" ? "Turn" : "River";
       this.pushLog(`--- ${label}: ${c} ---`);
       this.state.street = next;
+      this.streetPlayerCounts[next] = this.state.players.filter(p => p.inHand && !p.folded).length;
       this.resetForNewStreet();
       this.updateLiveHandRanks();
       this.updatePlayerOuts();
@@ -818,8 +848,10 @@ export class Table {
         : `${label} dealt. Action on ${this.state.players[this.state.currentTurnIndex].name}.`;
     } else if (next === "SHOWDOWN") {
       this.state.street = next;
+      this.wentToShowdown = true;
       this.returnUnclaimedChips();
       this.updatePots();
+      this.handTotalPot = this.state.pot;
       this.autoEvaluateAndAwardPots();
       if (this.allShowdownChoicesMade()) { this.endHand(); return; }
       this.state.dealerMessage = "Showdown: pots awarded. Choose Show 0/1/2, then dealer ends hand.";
@@ -914,7 +946,7 @@ export class Table {
     this.state.winningHandName = undefined;
     this.state.dealerMessage = "Hand ended. Dealer may start next hand.";
     this.pushLog("--- Hand ended ---");
-    appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber } });
+    appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber, durationMs: Date.now() - this.handStartedAt, totalPot: this.handTotalPot, wentToShowdown: this.wentToShowdown, playerCounts: this.streetPlayerCounts } });
     appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: "SHOWDOWN", to: "DONE", handNumber: this.state.handNumber, board: this.state.board } });
     // Check bust-triggered blind advance after stacks have settled
     if (this.state.settings.blindTrigger === "bust") this.checkAutoAdvanceBlinds();

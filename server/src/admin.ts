@@ -34,6 +34,7 @@ export function registerAdminRoutes(router: Router, tables: Map<string, Table>, 
         ended: table.ended,
         lastActivityAt: table.lastActivityAt,
         idleMin: Math.floor((Date.now() - table.lastActivityAt) / 60000),
+        telemetry: table.telemetryConfig,
         players: table.state.players.map(p => ({
           id: p.id,
           name: p.name,
@@ -76,6 +77,15 @@ export function registerAdminRoutes(router: Router, tables: Map<string, Table>, 
       broadcast(req.params.id, table);
       res.json({ ok: true });
     } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  router.post("/api/table/:id/set-telemetry", (req, res) => {
+    const table = tables.get(req.params.id);
+    if (!table) return res.status(404).json({ error: "Table not found." });
+    const { decisionMs } = req.body ?? {};
+    if (typeof decisionMs !== "boolean") return res.status(400).json({ error: "decisionMs (boolean) required." });
+    table.adminSetTelemetry({ decisionMs });
+    res.json({ ok: true });
   });
 
   // Admin HTML page
@@ -192,6 +202,10 @@ function load() {
                 <select id="bank-sel-\${r.id}">\${playerOptions}</select>
                 <button class="btn-assign" onclick="reassign('\${r.id}','bank')">Set bank</button>
               </div>
+              <div class="reassign-group">
+                <label>Decision-time telemetry:</label>
+                <button class="btn-assign" onclick="toggleTelemetry('\${r.id}', \${!r.telemetry.decisionMs})">\${r.telemetry.decisionMs ? '✓ ON — click to disable' : 'OFF — click to enable'}</button>
+              </div>
             </div>\`}
           </td>
         </tr>\`;
@@ -216,6 +230,11 @@ function kill(id) {
     setStatus(r.ok ? 'Deleted ' + id : r.error, r.ok);
     load();
   });
+}
+function toggleTelemetry(tableId, enable) {
+  apiPost('/admin/api/table/' + tableId + '/set-telemetry', { decisionMs: enable })
+    .then(r => { setStatus(r.ok ? 'Decision-time telemetry ' + (enable ? 'enabled' : 'disabled') : (r.error || 'Error'), r.ok ? true : false); load(); })
+    .catch(() => setStatus('Request failed', false));
 }
 load();
 setInterval(load, 10000);
