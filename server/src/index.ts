@@ -161,10 +161,14 @@ wss.on("connection", (ws) => {
         if (msg.playerId) {
           player = table.reconnectPlayer(msg.playerId, msg.name, msg.emoji);
           if (player) {
-            // Remove stale connections for this playerId
-            for (const c of conns) {
-              if (c.playerId === player.id && c.tableId === msg.tableId) {
+            // Close and remove any stale connections for this playerId.
+            // Closing the WS triggers its close handler, which checks conns
+            // before marking disconnected — so the order here matters: we
+            // delete first, then close so the handler sees no stale entries.
+            for (const c of [...conns]) {
+              if (c.playerId === player.id && c.tableId === msg.tableId && c.ws !== ws) {
                 conns.delete(c);
+                c.ws.close();
               }
             }
           }
@@ -240,20 +244,32 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     if (!current) return;
+    // Delete this conn first so the "still connected?" check below is accurate.
+    conns.delete(current);
     const table = tables.get(current.tableId);
     if (table) {
-      table.markDisconnected(current.playerId);
-      broadcastState(current.tableId, table);
+      // Only mark disconnected if no other active connection exists for this player.
+      // This prevents a stale WS close (from a previous session/tab) from
+      // incorrectly marking a freshly-reconnected player as offline.
+      const stillConnected = [...conns].some(
+        c => c.playerId === current!.playerId && c.tableId === current!.tableId
+      );
+      if (!stillConnected) {
+        table.markDisconnected(current.playerId);
+        broadcastState(current.tableId, table);
+      }
     }
-    conns.delete(current);
   });
 });
 
-// Clock expiry — check every 500 ms, auto-fold any player whose clock ran out
+// Clock expiry + auto-start — check every 500 ms
 setInterval(() => {
   for (const [tableId, table] of tables) {
     if (table.state.clockEndsAt && Date.now() >= table.state.clockEndsAt) {
       if (table.expireClock()) broadcastState(tableId, table);
+    }
+    if (table.state.autoStartAt && Date.now() >= table.state.autoStartAt) {
+      if (table.doAutoStart()) broadcastState(tableId, table);
     }
   }
 }, 500);

@@ -35,6 +35,7 @@ export function registerAdminRoutes(router: Router, tables: Map<string, Table>, 
         lastActivityAt: table.lastActivityAt,
         idleMin: Math.floor((Date.now() - table.lastActivityAt) / 60000),
         telemetry: table.telemetryConfig,
+        autoStartDelaySeconds: table.state.settings.autoStartDelaySeconds ?? 0,
         players: table.state.players.map(p => ({
           id: p.id,
           name: p.name,
@@ -85,6 +86,15 @@ export function registerAdminRoutes(router: Router, tables: Map<string, Table>, 
     const { decisionMs } = req.body ?? {};
     if (typeof decisionMs !== "boolean") return res.status(400).json({ error: "decisionMs (boolean) required." });
     table.adminSetTelemetry({ decisionMs });
+    res.json({ ok: true });
+  });
+
+  router.post("/api/table/:id/set-auto-start", (req, res) => {
+    const table = tables.get(req.params.id);
+    if (!table) return res.status(404).json({ error: "Table not found." });
+    const { delaySeconds } = req.body ?? {};
+    if (typeof delaySeconds !== "number" || delaySeconds < 0) return res.status(400).json({ error: "delaySeconds (non-negative number) required." });
+    table.adminSetAutoStartDelay(Math.floor(delaySeconds));
     res.json({ ok: true });
   });
 
@@ -206,6 +216,17 @@ function load() {
                 <label>Decision-time telemetry:</label>
                 <button class="btn-assign" onclick="toggleTelemetry('\${r.id}', \${!r.telemetry.decisionMs})">\${r.telemetry.decisionMs ? '✓ ON — click to disable' : 'OFF — click to enable'}</button>
               </div>
+              <div class="reassign-group">
+                <label>Auto-start delay:</label>
+                <select id="autostart-sel-\${r.id}" onchange="setAutoStart('\${r.id}', this.value)">
+                  <option value="0" \${r.autoStartDelaySeconds===0?'selected':''}>Off</option>
+                  <option value="5" \${r.autoStartDelaySeconds===5?'selected':''}>5s</option>
+                  <option value="10" \${r.autoStartDelaySeconds===10?'selected':''}>10s</option>
+                  <option value="15" \${r.autoStartDelaySeconds===15?'selected':''}>15s</option>
+                  <option value="30" \${r.autoStartDelaySeconds===30?'selected':''}>30s</option>
+                  <option value="60" \${r.autoStartDelaySeconds===60?'selected':''}>60s</option>
+                </select>
+              </div>
             </div>\`}
           </td>
         </tr>\`;
@@ -234,6 +255,11 @@ function kill(id) {
 function toggleTelemetry(tableId, enable) {
   apiPost('/admin/api/table/' + tableId + '/set-telemetry', { decisionMs: enable })
     .then(r => { setStatus(r.ok ? 'Decision-time telemetry ' + (enable ? 'enabled' : 'disabled') : (r.error || 'Error'), r.ok ? true : false); load(); })
+    .catch(() => setStatus('Request failed', false));
+}
+function setAutoStart(tableId, delaySeconds) {
+  apiPost('/admin/api/table/' + tableId + '/set-auto-start', { delaySeconds: Number(delaySeconds) })
+    .then(r => { setStatus(r.ok ? 'Auto-start delay set to ' + delaySeconds + 's' : (r.error || 'Error'), r.ok ? true : false); load(); })
     .catch(() => setStatus('Request failed', false));
 }
 load();

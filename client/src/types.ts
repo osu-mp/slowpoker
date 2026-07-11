@@ -47,6 +47,7 @@ export type TableSettings = {
   rebuysOpenUntil: number;
   homeRules: { allowMidHandReveal: boolean; showOuts: boolean };
   clockSeconds: number;
+  autoStartDelaySeconds: number;
 };
 
 export type GameConfigUpdate = {
@@ -106,6 +107,7 @@ export type TableState = {
   actionLog: string[];
   dealerMessage?: string;
   winningHandName?: string;
+  autoStartAt?: number;
 };
 
 export type PlayerAction =

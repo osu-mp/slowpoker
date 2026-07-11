@@ -45,6 +45,7 @@ export type TableSettings = {
   rebuysOpenUntil: number;      // 0 = closed; >0 = closes at this ms timestamp
   homeRules: { allowMidHandReveal: boolean; showOuts: boolean };
   clockSeconds: number;         // 0 = clock disabled; >0 = seconds to act when clock is called
+  autoStartDelaySeconds: number; // 0 = disabled; >0 = auto-start next hand after this many seconds
 };
 
 export type GameConfigUpdate = {
@@ -105,6 +106,7 @@ export type TableState = {
   actionLog: string[];
   dealerMessage?: string;
   winningHandName?: string;
+  autoStartAt?: number;         // ms timestamp when server will auto-start next hand (0/absent = no timer)
 };
 
 export type PlayerAction =

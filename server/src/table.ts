@@ -65,6 +65,7 @@ export class Table {
       rebuysEnabled: false, rebuysOpenUntil: 0,
       homeRules: { allowMidHandReveal: false, showOuts: false },
       clockSeconds: 30,
+      autoStartDelaySeconds: 0,
     };
 
     this.state = {
@@ -297,6 +298,20 @@ export class Table {
   adminSetTelemetry(opts: { decisionMs: boolean }) {
     this.telemetryDecisionMs = opts.decisionMs;
     appendEvent({ ts: Date.now(), type: "TELEMETRY_CONFIG", tableId: this.tableId, sessionId: this.state.sessionId, payload: opts });
+  }
+
+  adminSetAutoStartDelay(seconds: number) {
+    this.state.settings.autoStartDelaySeconds = seconds;
+    appendEvent({ ts: Date.now(), type: "CONFIG_CHANGED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { autoStartDelaySeconds: seconds } });
+  }
+
+  /** Called by the server interval when autoStartAt has elapsed. */
+  doAutoStart(): boolean {
+    if (this.state.street !== "DONE" || !this.state.autoStartAt || Date.now() < this.state.autoStartAt) return false;
+    this.state.autoStartAt = undefined;
+    const p = this.state.players.find(pl => pl.connected && !pl.sittingOut && pl.stack > 0);
+    if (!p) return false;
+    try { this.startHand(p.id); return true; } catch { return false; }
   }
 
   setStack(bankId: string, targetPlayerId: string, stack: number) {
@@ -582,14 +597,19 @@ export class Table {
       this.state.positions = null;
       this.state.streetBet = 0;
       this.state.roundComplete = true;
-      this.state.dealerMessage = "Hand ended (uncontested). Players may show cards. Dealer: start next hand when ready.";
+      const delay = this.state.settings.autoStartDelaySeconds ?? 0;
+      this.state.autoStartAt = delay > 0 ? Date.now() + delay * 1000 : undefined;
+      this.state.dealerMessage = delay > 0
+        ? `Hand ended (uncontested). Next hand starts in ${delay}s.`
+        : "Hand ended (uncontested). Players may show cards. Anyone may start next hand.";
       return true;
     }
     return false;
   }
 
-  startHand(dealerId: string) {
-    this.requireDealer(dealerId);
+  startHand(playerId: string) {
+    const p = this.playerById(playerId);
+    if (!p) throw new Error("No such player.");
     this.checkAutoAdvanceBlinds();
     const n = this.state.players.length;
     if (n < 2) throw new Error("Need at least 2 players.");
@@ -625,6 +645,7 @@ export class Table {
     this.state.highCardRound = undefined;
     this.state.clockEndsAt = undefined;
     this.state.clockCalledBy = undefined;
+    this.state.autoStartAt = undefined;
 
     const sbPlayer = this.state.players[sbIndex];
     const bbPlayer = this.state.players[bbIndex];
@@ -870,14 +891,17 @@ export class Table {
     }
   }
 
-  nextStreet(dealerId: string) {
-    this.requireDealer(dealerId);
+  nextStreet(playerId: string) {
     if (this.state.street === "DONE") throw new Error("No active hand.");
 
     if (this.state.street === "SHOWDOWN") {
+      // Anyone can close the showdown and move to between-hands
       this.endHand();
       return;
     }
+
+    // All-in run-out advancement and void are dealer-only
+    this.requireDealer(playerId);
 
     // All-in run-out: betting is already complete, advance to the next street
     if (this.state.roundComplete) {
@@ -944,7 +968,11 @@ export class Table {
     this.state.pots = [];
     this.state.pot = 0;
     this.state.winningHandName = undefined;
-    this.state.dealerMessage = "Hand ended. Dealer may start next hand.";
+    const delay = this.state.settings.autoStartDelaySeconds ?? 0;
+    this.state.autoStartAt = delay > 0 ? Date.now() + delay * 1000 : undefined;
+    this.state.dealerMessage = delay > 0
+      ? `Hand ended. Next hand starts in ${delay}s.`
+      : "Hand ended. Anyone may start next hand.";
     this.pushLog("--- Hand ended ---");
     appendEvent({ ts: Date.now(), type: "HAND_ENDED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { handNumber: this.state.handNumber, durationMs: Date.now() - this.handStartedAt, totalPot: this.handTotalPot, wentToShowdown: this.wentToShowdown, playerCounts: this.streetPlayerCounts } });
     appendEvent({ ts: Date.now(), type: "STREET_ADVANCED", tableId: this.tableId, sessionId: this.state.sessionId, payload: { from: "SHOWDOWN", to: "DONE", handNumber: this.state.handNumber, board: this.state.board } });

@@ -31,6 +31,16 @@ export function connect(
   let ws: WebSocket | null = null;
   const queue: ClientToServer[] = [];
 
+  function handleVisibilityChange() {
+    if (document.visibilityState === "visible" && !intentionalClose) {
+      if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        attempt = 0; // reset backoff so mobile wake-up reconnects immediately
+        openSocket();
+      }
+    }
+  }
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
   function openSocket() {
     ws = new WebSocket(getWsUrl());
 
@@ -88,6 +98,7 @@ export function connect(
 
   function close() {
     intentionalClose = true;
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     ws?.close();
   }

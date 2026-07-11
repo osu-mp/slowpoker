@@ -154,8 +154,8 @@ input[type="range"] { padding: 0; height: 28px; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 62px;
+  width: 50px;
+  height: 70px;
   border-radius: 6px;
   border: 1.5px solid rgba(255,255,255,0.25);
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -169,11 +169,11 @@ input[type="range"] { padding: 0; height: 28px; }
 .playingCard.blue { color: #60a5fa; }
 .playingCard.green { color: #4ade80; }
 .playingCard .rank {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 700;
 }
 .playingCard .suit {
-  font-size: 13px;
+  font-size: 15px;
   margin-top: -1px;
 }
 .playingCard.card-back {
@@ -183,22 +183,22 @@ input[type="range"] { padding: 0; height: 28px; }
 
 /* Medium — board cards */
 .playingCard.md {
-  width: 54px;
-  height: 76px;
+  width: 62px;
+  height: 88px;
   border-radius: 7px;
 }
-.playingCard.md .rank { font-size: 21px; }
-.playingCard.md .suit { font-size: 16px; }
+.playingCard.md .rank { font-size: 25px; }
+.playingCard.md .suit { font-size: 19px; }
 
 /* Large — hole cards in seats and your hand area */
 .playingCard.lg {
-  width: 66px;
-  height: 93px;
+  width: 74px;
+  height: 104px;
   border-radius: 8px;
   border-width: 2px;
 }
-.playingCard.lg .rank { font-size: 26px; }
-.playingCard.lg .suit { font-size: 20px; }
+.playingCard.lg .rank { font-size: 30px; }
+.playingCard.lg .suit { font-size: 23px; }
 
 /* Seat card area */
 .seatCards {
@@ -429,6 +429,8 @@ input[type="range"] { padding: 0; height: 28px; }
   border: 1px solid rgba(220, 60, 60, 0.45);
   font-size: 14px;
   animation: clockPulse 1s ease-in-out infinite alternate;
+  position: relative;
+  z-index: 50;
 }
 @keyframes clockPulse {
   from { border-color: rgba(220, 60, 60, 0.3); background: rgba(220, 60, 60, 0.12); }

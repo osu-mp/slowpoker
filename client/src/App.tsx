@@ -1580,11 +1580,10 @@ export default function App() {
             )}
           </div>
         )}
-        <label className="hstack" style={{ gap: 6, cursor: state.street === "DONE" ? "pointer" : "default" }}>
+        <label className="hstack" style={{ gap: 6, cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={!!you?.sittingOut}
-            disabled={state.street !== "DONE"}
             onChange={(e) => send({ type: e.target.checked ? "SIT_OUT" : "SIT_IN" })}
           />
           <span className="small">Sit out next hand</span>
@@ -1611,39 +1610,48 @@ export default function App() {
       {/* ── Sticky action bar ── */}
       <div className="actions">
         {state.street === "DONE" && (
-          isDealer ? (
+          <>
             <div className="actionBar">
-              <button onClick={() => { if (autoStartRef.current) { clearInterval(autoStartRef.current); autoStartRef.current = null; setAutoStartCountdown(null); } send({ type: "START_HAND" }); }}>
+              {/* Server auto-start countdown — visible to everyone when admin configures a delay */}
+              {state.autoStartAt && state.autoStartAt > clockNow && (
+                <span className="pill">{Math.ceil((state.autoStartAt - clockNow) / 1000)}s…</span>
+              )}
+              <button onClick={() => {
+                if (autoStartRef.current) { clearInterval(autoStartRef.current); autoStartRef.current = null; setAutoStartCountdown(null); }
+                send({ type: "START_HAND" });
+              }}>
                 {autoStartCountdown !== null ? `Starting in ${autoStartCountdown}s… (click to start now)` : "Start hand"}
               </button>
-              <button className="secondary" onClick={() => send({ type: "CUT_FOR_DEALER" })}
-                title="Deal one face-up card to each player; highest card gets the button">
-                {state.highCardRound && state.highCardRound.tiedIds.length > 0 ? "Redraw (tied)" : "High Card → Button"}
-              </button>
-              {isAdmin && state.highCardRound?.winnerId && (
-                <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: state.highCardRound!.winnerId! })}
-                  title="Also make the high-card winner the dealer (game host)">
-                  Make Dealer
-                </button>
-              )}
-              <div className="autoStartControl">
-                <span className="small">Auto-start:</span>
-                <select value={autoStartSecs} onChange={e => {
-                  const v = Number(e.target.value);
-                  setAutoStartSecs(v);
-                  localStorage.setItem("sp-autoStart", String(v));
-                }} style={{ fontSize: 12, padding: "2px 4px" }}>
-                  <option value={0}>Off</option>
-                  <option value={5}>5s</option>
-                  <option value={10}>10s</option>
-                  <option value={15}>15s</option>
-                  <option value={30}>30s</option>
-                </select>
-              </div>
             </div>
-          ) : (
-            <div className="waitingBanner">Waiting for dealer to start the next hand...</div>
-          )
+            {isDealer && (
+              <div className="actionBar">
+                <button className="secondary" onClick={() => send({ type: "CUT_FOR_DEALER" })}
+                  title="Deal one face-up card to each player; highest card gets the button">
+                  {state.highCardRound && state.highCardRound.tiedIds.length > 0 ? "Redraw (tied)" : "High Card → Button"}
+                </button>
+                {isAdmin && state.highCardRound?.winnerId && (
+                  <button className="secondary" onClick={() => send({ type: "SET_DEALER", playerId: state.highCardRound!.winnerId! })}
+                    title="Also make the high-card winner the dealer (game host)">
+                    Make Dealer
+                  </button>
+                )}
+                <div className="autoStartControl">
+                  <span className="small">Auto-start:</span>
+                  <select value={autoStartSecs} onChange={e => {
+                    const v = Number(e.target.value);
+                    setAutoStartSecs(v);
+                    localStorage.setItem("sp-autoStart", String(v));
+                  }} style={{ fontSize: 12, padding: "2px 4px" }}>
+                    <option value={0}>Off</option>
+                    <option value={5}>5s</option>
+                    <option value={10}>10s</option>
+                    <option value={15}>15s</option>
+                    <option value={30}>30s</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Clock countdown banner */}
@@ -1711,7 +1719,7 @@ export default function App() {
                 <span className="pill">You chose: {renderChoice(state.showdownChoices[youId])}</span>
               )}
             </div>
-            {isDealer && (() => {
+            {(() => {
               const pendingChoices = state.players.filter(p => p.inHand && !p.folded && !state.showdownChoices[p.id]).length;
               return (
                 <div className="actionBar">
@@ -1719,9 +1727,11 @@ export default function App() {
                     if (pendingChoices > 0 && !confirm(`${pendingChoices} player${pendingChoices > 1 ? "s have" : " has"} not chosen yet. End hand anyway?`)) return;
                     send({ type: "NEXT_STREET" });
                   }}>End hand</button>
-                  <button className="secondary" onClick={() => {
-                    if (confirm("End the session? All players will see the recap.")) send({ type: "END_SESSION" });
-                  }}>End session</button>
+                  {isDealer && (
+                    <button className="secondary" onClick={() => {
+                      if (confirm("End the session? All players will see the recap.")) send({ type: "END_SESSION" });
+                    }}>End session</button>
+                  )}
                 </div>
               );
             })()}
@@ -2082,13 +2092,22 @@ function BettingPanel(props: {
 
       <div style={{ width: 1, height: 32, background: "rgba(255,255,255,0.15)", margin: "0 4px" }} />
 
-      {/* Bet presets */}
+      {/* Bet presets — clicking immediately submits the bet */}
       <div className="betPresets">
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1/3))}>1/3 Pot</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1/2))}>1/2 Pot</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(2/3))}>2/3 Pot</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(fractionTo(1))}>Pot</button>
-        <button className="secondary" disabled={!enabled} onClick={() => setToSafe(maxTo)}>All-in</button>
+        {([1/3, 1/2, 2/3, 1] as const).map((frac) => {
+          const amount = clamp(Math.floor(fractionTo(frac)), 0, maxTo);
+          const label = frac === 1/3 ? "1/3 Pot" : frac === 1/2 ? "1/2 Pot" : frac === 2/3 ? "2/3 Pot" : "Pot";
+          return (
+            <button key={label} className="secondary" disabled={!enabled}
+              onClick={() => onAct(isBet ? { kind: "BET", to: amount } : { kind: "RAISE", to: amount })}>
+              {label}
+            </button>
+          );
+        })}
+        <button className="secondary" disabled={!enabled}
+          onClick={() => onAct(isBet ? { kind: "BET", to: maxTo } : { kind: "RAISE", to: maxTo })}>
+          All-in
+        </button>
       </div>
 
       {/* Custom sizing */}
